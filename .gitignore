@@ -1,0 +1,27 @@
+# Dependencias
+node_modules/
+
+# Build, caches y salidas locales
+.next/
+dist/
+coverage/
+.npm-cache/
+.playwright-browsers/
+output/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Variables de entorno reales
+.env
+.env.*
+!.env.example
+
+# Archivos de sistema y editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
