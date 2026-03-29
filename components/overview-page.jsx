@@ -18,6 +18,8 @@ function flattenSlots(calendar) {
 // Esta vista mezcla resumen, accesos rapidos e integraciones en una sola pantalla.
 export function OverviewPage({ data }) {
   const nextAppointments = flattenSlots(data.calendar).slice(0, 3);
+  const agendaLabel = data.calendarMeta?.label || "Agenda";
+  const agendaNote = data.calendarMeta?.note || "";
 
   return (
     <>
@@ -114,24 +116,32 @@ export function OverviewPage({ data }) {
           <div className="content-card__header">
             <div>
               <h2>Proximos turnos</h2>
-              <p>Vista rapida de la agenda inmediata.</p>
+              <p>{agendaNote || "Vista rapida de la agenda inmediata."}</p>
             </div>
+            <span className="content-card__meta">{agendaLabel}</span>
           </div>
 
-          <div className="list-rows">
-            {nextAppointments.map((slot) => (
-              <div key={`${slot.date}-${slot.time}-${slot.patient}`} className="list-row">
-                <strong className="list-row__time">{slot.time}</strong>
-                <div>
-                  <strong>{slot.patient}</strong>
-                  <p>
-                    {slot.dayLabel} | {slot.doctor}
-                  </p>
+          {nextAppointments.length > 0 ? (
+            <div className="list-rows">
+              {nextAppointments.map((slot) => (
+                <div key={`${slot.date}-${slot.time}-${slot.patient}`} className="list-row">
+                  <strong className="list-row__time">{slot.time}</strong>
+                  <div>
+                    <strong>{slot.patient}</strong>
+                    <p>
+                      {slot.dayLabel} | {slot.doctor}
+                    </p>
+                  </div>
+                  <span className="tag">{slot.type}</span>
                 </div>
-                <span className="tag">{slot.type}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state empty-state--compact">
+              <h3>Sin turnos visibles</h3>
+              <p>{agendaNote || "No hay eventos disponibles para mostrar en este bloque."}</p>
+            </div>
+          )}
         </article>
 
         <article className="content-card">

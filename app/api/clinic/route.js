@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   return NextResponse.json({
-    ...(await getClinicViewModel()),
+    ...(await getClinicViewModel({ syncGoogleAgenda: true })),
     generatedAt: new Date().toISOString()
   });
 }
-

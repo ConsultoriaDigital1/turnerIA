@@ -3,19 +3,17 @@
 import { NextResponse } from "next/server";
 
 import { getClinicViewModel } from "@/lib/clinic-view-model";
-import { getGoogleCalendarAgenda } from "@/lib/google-calendar";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET() {
-  const baseData = await getClinicViewModel();
-  const agenda = await getGoogleCalendarAgenda(baseData.calendar);
+  const data = await getClinicViewModel({ syncGoogleAgenda: true });
 
   return NextResponse.json(
     {
-      calendar: agenda.calendar,
-      meta: agenda.meta
+      calendar: data.calendar,
+      meta: data.calendarMeta
     },
     {
       headers: {

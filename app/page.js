@@ -7,7 +7,7 @@ import { getClinicViewModel } from "@/lib/clinic-view-model";
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const data = await getClinicViewModel();
+  const data = await getClinicViewModel({ syncGoogleAgenda: true });
 
   return (
     <DashboardShell>
@@ -15,4 +15,3 @@ export default async function HomePage() {
     </DashboardShell>
   );
 }
-
