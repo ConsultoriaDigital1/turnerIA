@@ -13,8 +13,25 @@ export function LoginForm({ authConfigured, defaultEmail }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Aca leo respuestas JSON sin romperme si el backend devuelve HTML o cuerpo vacio.
+  async function readJsonSafely(response) {
+    const rawBody = await response.text();
+
+    if (!rawBody) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(rawBody);
+    } catch {
+      return {
+        error: rawBody
+      };
+    }
+  }
+
   // Aca mando el login, manejo errores y redirijo al destino pedido o a la home.
-async function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     setSubmitting(true);
     setError("");
@@ -30,10 +47,10 @@ async function handleSubmit(event) {
           password
         })
       });
-      const payload = await response.json();
+      const payload = await readJsonSafely(response);
 
       if (!response.ok) {
-        throw new Error(payload.error || "No se pudo iniciar sesion.");
+        throw new Error(payload?.error || `No se pudo iniciar sesion. HTTP ${response.status}.`);
       }
 
       router.replace(searchParams.get("next") || "/");
@@ -51,7 +68,12 @@ async function handleSubmit(event) {
         <div className="login-card__brand">
           <p className="brand-card__eyebrow">agenda medica inteligente</p>
           <h1 className="brand-card__title">turnerIA</h1>
-          <p className="brand-card__eyebrow" style={{ marginTop: "0.5rem", marginBottom: "1rem", fontSize: "0.85rem", opacity: 0.7, letterSpacing: "0.02em", textTransform: "none" }}>by Consultoría Digital</p>
+          <p
+            className="brand-card__eyebrow"
+            style={{ marginTop: "0.5rem", marginBottom: "1rem", fontSize: "0.85rem", opacity: 0.7, letterSpacing: "0.02em", textTransform: "none" }}
+          >
+            by Consultoria Digital
+          </p>
           <p className="subtle-copy">
             Acceso privado por JWT. El resto de la app queda bloqueado hasta iniciar sesion.
           </p>
