@@ -43,6 +43,7 @@ async function handleLogout() {
           <div>
             <p className="brand-card__eyebrow">agenda medica inteligente</p>
             <h2 className="brand-card__title">{APP_NAME}</h2>
+            <p className="brand-card__eyebrow" style={{ marginTop: "0.35rem", fontSize: "0.68rem", opacity: 0.5, letterSpacing: "0.02em", textTransform: "none" }}>by Consultoría Digital</p>
           </div>
         </Link>
 

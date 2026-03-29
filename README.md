@@ -1,4 +1,7 @@
 # turnerIA
+by Consultoría Digital
+
+Agenda médica inteligente con integración de Google Calendar y automatizaciones n8n.
 
 turnerIA es una base de trabajo para un consultorio hecha con Next.js 15 y React 19.
 La app hoy resuelve login con JWT, dashboard operativo, pacientes, doctores, agenda interna,
