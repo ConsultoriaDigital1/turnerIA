@@ -2,7 +2,6 @@
 
 import "./globals.css";
 
-import { FirebaseAnalyticsBootstrap } from "@/components/firebase-analytics-bootstrap";
 import { getAppSettingsInitScript } from "@/lib/app-settings";
 
 export const metadata = {
@@ -20,7 +19,6 @@ export default function RootLayout({ children }) {
     <html lang="es" translate="no" suppressHydrationWarning className="notranslate">
       <body suppressHydrationWarning className="notranslate">
         <script id="turneria-app-settings" dangerouslySetInnerHTML={{ __html: appSettingsInitScript }} />
-        <FirebaseAnalyticsBootstrap />
         {children}
       </body>
     </html>
