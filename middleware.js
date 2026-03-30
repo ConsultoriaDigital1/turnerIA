@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 
-import { getAuthCookieName, verifySessionToken } from "@/lib/auth";
+import { getAuthCookieName, verifyApiKey, verifySessionToken } from "@/lib/auth";
 
 // Aca marco las rutas publicas de frontend que no necesitan sesion.
 function isPublicPath(pathname) {
@@ -28,6 +28,12 @@ export async function middleware(request) {
       }
     }
 
+    return NextResponse.next();
+  }
+
+  const apiKey = request.headers.get("x-api-key");
+
+  if (apiKey && verifyApiKey(apiKey)) {
     return NextResponse.next();
   }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createPatient, getClinicDashboardData } from "@/lib/clinic-store";
+import { createPatient, getClinicDashboardData, getClinicPatients } from "@/lib/clinic-store";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,15 @@ function getErrorStatus(error) {
   return typeof error?.status === "number" ? error.status : 500;
 }
 
-export async function GET() {
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const phone = searchParams.get("phone");
+
+  if (phone) {
+    const patients = await getClinicPatients({ phone });
+    return NextResponse.json({ patients });
+  }
+
   const data = await getClinicDashboardData();
 
   return NextResponse.json({
