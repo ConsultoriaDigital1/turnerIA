@@ -15,7 +15,7 @@ export function DashboardShell({ children }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Aca cierro sesion desde el header y fuerzo la vuelta al login.
-async function handleLogout() {
+  async function handleLogout() {
     if (isLoggingOut) {
       return;
     }
@@ -39,11 +39,14 @@ async function handleLogout() {
     <div className="shell notranslate" translate="no" suppressHydrationWarning>
       <aside className="shell__sidebar">
         <Link href="/" className="brand-card">
-          <div className="brand-card__badge" />
+          <div className="brand-card__stamp" aria-hidden="true">
+            <span>CONSULTORIA</span>
+            <span>DIGITAL</span>
+          </div>
+
           <div>
             <p className="brand-card__eyebrow">agenda medica inteligente</p>
             <h2 className="brand-card__title">{APP_NAME}</h2>
-            <p className="brand-card__eyebrow" style={{ marginTop: "0.35rem", fontSize: "0.68rem", opacity: 0.5, letterSpacing: "0.02em", textTransform: "none" }}>by Consultoría Digital</p>
           </div>
         </Link>
 

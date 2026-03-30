@@ -2,16 +2,22 @@
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import { PatientsPage } from "@/components/patients-page";
-import { getClinicViewModel } from "@/lib/clinic-view-model";
+import { buildClinicFilters } from "@/lib/clinic-view-model";
+import { getClinicPatientsRouteData } from "@/lib/clinic-store";
 
 export const dynamic = "force-dynamic";
 
 export default async function PatientsRoutePage() {
-  const data = await getClinicViewModel();
+  const data = await getClinicPatientsRouteData();
 
   return (
     <DashboardShell>
-      <PatientsPage patients={data.patients} filters={data.filters} doctors={data.doctors} storage={data.storage} />
+      <PatientsPage
+        patients={data.patients}
+        filters={buildClinicFilters(data.patients)}
+        doctors={data.doctors}
+        storage={data.storage}
+      />
     </DashboardShell>
   );
 }

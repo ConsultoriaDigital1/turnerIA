@@ -2,12 +2,12 @@
 
 import { DashboardShell } from "@/components/dashboard-shell";
 import { DoctorsPage } from "@/components/doctors-page";
-import { getClinicViewModel } from "@/lib/clinic-view-model";
+import { getClinicDoctorsRouteData } from "@/lib/clinic-store";
 
 export const dynamic = "force-dynamic";
 
 export default async function DoctorsRoutePage() {
-  const data = await getClinicViewModel();
+  const data = await getClinicDoctorsRouteData();
 
   return (
     <DashboardShell>

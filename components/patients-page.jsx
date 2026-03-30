@@ -3,6 +3,7 @@
 // Aca renderizo pacientes, filtros y altas persistidas en Neon desde esta ruta.
 
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 import { formatShortSpanishDate } from "@/lib/date-format";
@@ -71,6 +72,7 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
   const [insurance, setInsurance] = useState("all");
   const [doctor, setDoctor] = useState("all");
   const [form, setForm] = useState(() => buildInitialPatientForm(doctors));
+  const [isOpen, setIsOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
@@ -91,6 +93,28 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
     });
   }, [doctors]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
   const visiblePatients = patients.filter((patient) => {
     const matchesSearch =
       !deferredSearch.trim() ||
@@ -109,6 +133,15 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
       ...current,
       [key]: value
     }));
+  }
+
+  function openModal() {
+    if (!canCreate) {
+      return;
+    }
+
+    setMessage("");
+    setIsOpen(true);
   }
 
   async function handleSubmit(event) {
@@ -139,6 +172,7 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
       setForm(buildInitialPatientForm(doctors));
       setMessageType("success");
       setMessage(payload?.message || "Paciente creado.");
+      setIsOpen(false);
       startTransition(() => {
         router.refresh();
       });
@@ -150,59 +184,28 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
     }
   }
 
-  return (
-    <>
-      <section className="hero-panel">
-        <div>
-          <p className="hero-panel__eyebrow">Pacientes y seguimiento</p>
-          <h1>Pacientes</h1>
-          <p className="hero-panel__copy">
-            Busqueda rapida por nombre, doctor o cobertura. Esta ruta ahora tambien permite cargar altas
-            reales y persistirlas en Neon.
-          </p>
-        </div>
-
-        <div className="integration-card">
-          <span className={`integration-card__badge ${storage?.connected ? "is-live" : "is-idle"}`}>
-            {storage?.connected ? "Neon conectado" : "Modo semilla"}
-          </span>
-          <h2>{patients.length} historias</h2>
-          <p>
-            {storage?.connected
-              ? "Listado operativo para admision, seguimiento y altas nuevas persistidas."
-              : storage?.error || "Sin base de datos conectada, esta ruta queda solo de lectura."}
-          </p>
-        </div>
-      </section>
-
-      <section className="content-card">
-        <div className="content-card__header">
+  const modal = isOpen ? (
+    <div className="sheet-backdrop sheet-backdrop--center" onClick={() => setIsOpen(false)}>
+      <section
+        className="sheet sheet--event"
+        aria-modal="true"
+        role="dialog"
+        aria-labelledby="patient-form-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sheet__header">
           <div>
-            <h2>Alta de paciente</h2>
-            <p>Los pacientes nuevos quedan vinculados al doctor seleccionado dentro de Neon.</p>
+            <p className="sheet__eyebrow">Pacientes</p>
+            <h2 id="patient-form-title">Crear paciente</h2>
           </div>
-          <span className="content-card__meta">{canCreate ? "Persistente" : "Bloqueado"}</span>
+          <button type="button" className="sheet__close" onClick={() => setIsOpen(false)}>
+            Cerrar
+          </button>
         </div>
-
-        {message ? (
-          <div className={`inline-message ${messageType === "success" ? "inline-message--success" : "inline-message--error"}`}>
-            {message}
-          </div>
-        ) : null}
-
-        {!storage?.connected ? (
-          <div className="inline-message inline-message--error">
-            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar altas reales."}
-          </div>
-        ) : null}
-
-        {storage?.connected && doctors.length === 0 ? (
-          <div className="inline-message inline-message--error">
-            Primero crea al menos un doctor. Sin profesional no puedo vincular el paciente a la base.
-          </div>
-        ) : null}
 
         <form className="sheet-form" onSubmit={handleSubmit}>
+          <p className="sheet-copy">Completa los datos y el paciente quedara vinculado al profesional elegido.</p>
+
           <div className="sheet-form__grid">
             <label className="field field--stacked">
               <span>Nombre</span>
@@ -304,12 +307,70 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
           </div>
 
           <div className="sheet__actions">
-            <p className="subtle-copy">Los filtros de esta ruta se actualizan despues de guardar y refrescar.</p>
+            <button type="button" className="secondary-button" onClick={() => setIsOpen(false)}>
+              Cancelar
+            </button>
             <button type="submit" className="primary-button" disabled={isSubmitting || !canCreate}>
               {isSubmitting ? "Guardando..." : "Crear paciente"}
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <section className="hero-panel">
+        <div>
+          <p className="hero-panel__eyebrow">Pacientes y seguimiento</p>
+          <h1>Pacientes</h1>
+          <p className="hero-panel__copy">
+            Busqueda rapida por nombre, doctor o cobertura. Esta ruta ahora tambien permite cargar altas
+            reales y persistirlas en Neon.
+          </p>
+        </div>
+
+        <div className="integration-card">
+          <span className={`integration-card__badge ${storage?.connected ? "is-live" : "is-idle"}`}>
+            {storage?.connected ? "Neon conectado" : "Modo semilla"}
+          </span>
+          <h2>{patients.length} historias</h2>
+          <p>
+            {storage?.connected
+              ? "Listado operativo para admision, seguimiento y altas nuevas persistidas."
+              : storage?.error || "Sin base de datos conectada, esta ruta queda solo de lectura."}
+          </p>
+        </div>
+      </section>
+
+      <section className="content-card">
+        <div className="content-card__header">
+          <h2>Alta de paciente</h2>
+          <button type="button" className="primary-button" onClick={openModal} disabled={!canCreate}>
+            Crear paciente
+          </button>
+        </div>
+
+        {message ? (
+          <div className={`inline-message ${messageType === "success" ? "inline-message--success" : "inline-message--error"}`}>
+            {message}
+          </div>
+        ) : null}
+
+        {!storage?.connected ? (
+          <div className="inline-message inline-message--error">
+            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar altas reales."}
+          </div>
+        ) : null}
+
+        {storage?.connected && doctors.length === 0 ? (
+          <div className="inline-message inline-message--error">
+            Primero crea al menos un doctor. Sin profesional no puedo vincular el paciente a la base.
+          </div>
+        ) : null}
+
+
       </section>
 
       <section className="content-card">
@@ -408,6 +469,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
           </div>
         )}
       </section>
+
+      {modal && typeof document !== "undefined" ? createPortal(modal, document.body) : null}
     </>
   );
 }

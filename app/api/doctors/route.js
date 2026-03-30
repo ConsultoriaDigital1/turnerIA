@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createDoctor, getClinicDashboardData } from "@/lib/clinic-store";
+import { createDoctor, getClinicDoctorsRouteData } from "@/lib/clinic-store";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ function getErrorStatus(error) {
 }
 
 export async function GET() {
-  const data = await getClinicDashboardData();
+  const data = await getClinicDoctorsRouteData();
 
   return NextResponse.json({
     doctors: data.doctors,

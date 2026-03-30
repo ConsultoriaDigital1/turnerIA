@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createPatient, getClinicDashboardData, getClinicPatients } from "@/lib/clinic-store";
+import { createPatient, getClinicPatients, getClinicPatientsRouteData } from "@/lib/clinic-store";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,7 @@ export async function GET(request) {
     return NextResponse.json({ patients });
   }
 
-  const data = await getClinicDashboardData();
+  const data = await getClinicPatientsRouteData();
 
   return NextResponse.json({
     patients: data.patients,

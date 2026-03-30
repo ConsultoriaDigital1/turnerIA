@@ -2,7 +2,8 @@
 
 // Aca renderizo la vista de profesionales y permito altas persistidas en Neon.
 
-import { startTransition, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 function buildInitialDoctorForm() {
@@ -35,16 +36,48 @@ async function readJsonSafely(response) {
 export function DoctorsPage({ doctors, storage }) {
   const router = useRouter();
   const [form, setForm] = useState(buildInitialDoctorForm);
+  const [isOpen, setIsOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
   const canCreate = Boolean(storage?.writable);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
 
   function updateField(key, value) {
     setForm((current) => ({
       ...current,
       [key]: value
     }));
+  }
+
+  function openModal() {
+    if (!canCreate) {
+      return;
+    }
+
+    setMessage("");
+    setIsOpen(true);
   }
 
   async function handleSubmit(event) {
@@ -75,6 +108,7 @@ export function DoctorsPage({ doctors, storage }) {
       setForm(buildInitialDoctorForm());
       setMessageType("success");
       setMessage(payload?.message || "Doctor creado.");
+      setIsOpen(false);
       startTransition(() => {
         router.refresh();
       });
@@ -86,53 +120,28 @@ export function DoctorsPage({ doctors, storage }) {
     }
   }
 
-  return (
-    <>
-      <section className="hero-panel">
-        <div>
-          <p className="hero-panel__eyebrow">Profesionales</p>
-          <h1>Doctores</h1>
-          <p className="hero-panel__copy">
-            Informacion separada por ruta: especialidad, consultorio, horario y obras sociales de cada
-            profesional. Desde aca tambien puedes dar de alta nuevas fichas persistidas en Neon.
-          </p>
-        </div>
-
-        <div className="integration-card">
-          <span className={`integration-card__badge ${storage?.connected ? "is-live" : "is-idle"}`}>
-            {storage?.connected ? "Neon conectado" : "Modo semilla"}
-          </span>
-          <h2>{doctors.length} profesionales</h2>
-          <p>
-            {storage?.connected
-              ? "Las altas nuevas se guardan en la base de datos de la empresa."
-              : storage?.error || "Sin base de datos conectada, la pantalla queda solo de lectura."}
-          </p>
-        </div>
-      </section>
-
-      <section className="content-card">
-        <div className="content-card__header">
+  const modal = isOpen ? (
+    <div className="sheet-backdrop sheet-backdrop--center" onClick={() => setIsOpen(false)}>
+      <section
+        className="sheet"
+        aria-modal="true"
+        role="dialog"
+        aria-labelledby="doctor-form-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sheet__header">
           <div>
-            <h2>Alta de doctor</h2>
-            <p>Nombre, especialidad, consultorio, horario y obras sociales aceptadas.</p>
+            <p className="sheet__eyebrow">Profesionales</p>
+            <h2 id="doctor-form-title">Crear doctor</h2>
           </div>
-          <span className="content-card__meta">{storage?.connected ? "Persistente" : "Solo lectura"}</span>
+          <button type="button" className="sheet__close" onClick={() => setIsOpen(false)}>
+            Cerrar
+          </button>
         </div>
-
-        {message ? (
-          <div className={`inline-message ${messageType === "success" ? "inline-message--success" : "inline-message--error"}`}>
-            {message}
-          </div>
-        ) : null}
-
-        {!canCreate ? (
-          <div className="inline-message inline-message--error">
-            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar altas reales."}
-          </div>
-        ) : null}
 
         <form className="sheet-form" onSubmit={handleSubmit}>
+          <p className="sheet-copy">Carga nombre, especialidad, consultorio, horario y coberturas aceptadas.</p>
+
           <div className="sheet-form__grid">
             <label className="field field--stacked">
               <span>Nombre</span>
@@ -196,12 +205,62 @@ export function DoctorsPage({ doctors, storage }) {
           </label>
 
           <div className="sheet__actions">
-            <p className="subtle-copy">Las obras sociales se separan con coma y quedan normalizadas en Neon.</p>
+            <button type="button" className="secondary-button" onClick={() => setIsOpen(false)}>
+              Cancelar
+            </button>
             <button type="submit" className="primary-button" disabled={isSubmitting || !canCreate}>
               {isSubmitting ? "Guardando..." : "Crear doctor"}
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <section className="hero-panel">
+        <div>
+          <p className="hero-panel__eyebrow">Profesionales</p>
+          <h1>Doctores</h1>
+          <p className="hero-panel__copy">
+            Informacion separada por ruta: especialidad, consultorio, horario y obras sociales de cada
+            profesional. Desde aca tambien puedes dar de alta nuevas fichas persistidas en Neon.
+          </p>
+        </div>
+
+        <div className="integration-card">
+          <span className={`integration-card__badge ${storage?.connected ? "is-live" : "is-idle"}`}>
+            {storage?.connected ? "Neon conectado" : "Modo semilla"}
+          </span>
+          <h2>{doctors.length} profesionales</h2>
+          <p>
+            {storage?.connected
+              ? "Las altas nuevas se guardan en la base de datos de la empresa."
+              : storage?.error || "Sin base de datos conectada, la pantalla queda solo de lectura."}
+          </p>
+        </div>
+      </section>
+
+      <section className="content-card">
+        <div className="content-card__header">
+          <h2>Alta de doctor</h2>
+          <button type="button" className="primary-button" onClick={openModal} disabled={!canCreate}>
+            Crear doctor
+          </button>
+        </div>
+
+        {message ? (
+          <div className={`inline-message ${messageType === "success" ? "inline-message--success" : "inline-message--error"}`}>
+            {message}
+          </div>
+        ) : null}
+
+        {!canCreate ? (
+          <div className="inline-message inline-message--error">
+            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar altas reales."}
+          </div>
+        ) : null}
       </section>
 
       <section className="content-card">
@@ -243,6 +302,8 @@ export function DoctorsPage({ doctors, storage }) {
           ))}
         </div>
       </section>
+
+      {modal && typeof document !== "undefined" ? createPortal(modal, document.body) : null}
     </>
   );
 }
