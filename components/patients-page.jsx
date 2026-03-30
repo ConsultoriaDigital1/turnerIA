@@ -590,6 +590,7 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
             <div className="record-table__head">
               <span>Paciente</span>
               <span>Obra social</span>
+              <span>Plan</span>
               <span>Profesional</span>
               <span>Seguimiento</span>
             </div>
@@ -607,7 +608,12 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
 
                   <div>
                     <strong>{patient.insurance}</strong>
-                    <small>{patient.plan || "Sin plan"}</small>
+                    <small>Cobertura registrada</small>
+                  </div>
+
+                  <div>
+                    <strong>{patient.plan || "Sin plan"}</strong>
+                    <small>Plan del paciente</small>
                   </div>
 
                   <div>
