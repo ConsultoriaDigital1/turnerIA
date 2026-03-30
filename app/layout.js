@@ -2,6 +2,7 @@
 
 import "./globals.css";
 
+import { Analytics } from "@vercel/analytics/next";
 import { getAppSettingsInitScript } from "@/lib/app-settings";
 
 export const metadata = {
@@ -20,6 +21,7 @@ export default function RootLayout({ children }) {
       <body suppressHydrationWarning className="notranslate">
         <script id="turneria-app-settings" dangerouslySetInnerHTML={{ __html: appSettingsInitScript }} />
         {children}
+        <Analytics />
       </body>
     </html>
   );
