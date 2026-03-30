@@ -1,6 +1,6 @@
 "use client";
 
-// Aca renderizo pacientes, filtros y altas persistidas en Neon desde esta ruta.
+// Aca renderizo pacientes, filtros y CRUD persistido en Neon desde esta ruta.
 
 import { startTransition, useDeferredValue, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -32,11 +32,37 @@ function buildInitialPatientForm(doctors) {
     name: "",
     age: "",
     insurance: "",
+    plan: doctors[0]?.plan || "",
     doctorId: doctors[0]?.id || "",
     phone: "",
     lastVisit: "",
     nextAppointment: "",
     status: "active"
+  };
+}
+
+function getPatientDoctorId(patient, doctors) {
+  if (typeof patient?.doctorId === "string" && patient.doctorId) {
+    return patient.doctorId;
+  }
+
+  return doctors.find((doctor) => doctor.name === patient.doctor)?.id || doctors[0]?.id || "";
+}
+
+function buildPatientForm(patient, doctors) {
+  const doctorId = getPatientDoctorId(patient, doctors);
+  const selectedDoctor = doctors.find((doctor) => doctor.id === doctorId);
+
+  return {
+    name: patient.name || "",
+    age: String(patient.age || ""),
+    insurance: patient.insurance || "",
+    plan: patient.plan || selectedDoctor?.plan || "",
+    doctorId,
+    phone: patient.phone || "",
+    lastVisit: patient.lastVisit || "",
+    nextAppointment: patient.nextAppointment || "",
+    status: patient.status || "active"
   };
 }
 
@@ -72,13 +98,20 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
   const [insurance, setInsurance] = useState("all");
   const [doctor, setDoctor] = useState("all");
   const [form, setForm] = useState(() => buildInitialPatientForm(doctors));
-  const [isOpen, setIsOpen] = useState(false);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState("create");
+  const [editingPatientId, setEditingPatientId] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
   const deferredSearch = useDeferredValue(search);
-  const canCreate = Boolean(storage?.writable) && doctors.length > 0;
+  const canManage = Boolean(storage?.writable) && doctors.length > 0;
+  const canDelete = Boolean(storage?.writable);
+  const isEditing = formMode === "edit";
   const selectedDoctor = doctors.find((doctorOption) => doctorOption.id === form.doctorId) || null;
+  const isOverlayOpen = isFormOpen || Boolean(deleteTarget);
 
   useEffect(() => {
     setForm((current) => {
@@ -94,13 +127,14 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
   }, [doctors]);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOverlayOpen) {
       return undefined;
     }
 
     function handleKeyDown(event) {
       if (event.key === "Escape") {
-        setIsOpen(false);
+        setIsFormOpen(false);
+        setDeleteTarget(null);
       }
     }
 
@@ -113,12 +147,12 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen]);
+  }, [isOverlayOpen]);
 
   const visiblePatients = patients.filter((patient) => {
     const matchesSearch =
       !deferredSearch.trim() ||
-      [patient.name, patient.insurance, patient.doctor, patient.specialty, patient.phone]
+      [patient.name, patient.insurance, patient.plan, patient.doctor, patient.specialty, patient.phone]
         .join(" ")
         .toLowerCase()
         .includes(deferredSearch.trim().toLowerCase());
@@ -135,19 +169,49 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
     }));
   }
 
-  function openModal() {
-    if (!canCreate) {
+  function closeFormModal() {
+    setIsFormOpen(false);
+    setFormMode("create");
+    setEditingPatientId("");
+  }
+
+  function openCreateModal() {
+    if (!canManage) {
       return;
     }
 
     setMessage("");
-    setIsOpen(true);
+    setFormMode("create");
+    setEditingPatientId("");
+    setForm(buildInitialPatientForm(doctors));
+    setIsFormOpen(true);
+  }
+
+  function openEditModal(patient) {
+    if (!canManage) {
+      return;
+    }
+
+    setMessage("");
+    setFormMode("edit");
+    setEditingPatientId(patient.id);
+    setForm(buildPatientForm(patient, doctors));
+    setIsFormOpen(true);
+  }
+
+  function openDeleteModal(patient) {
+    if (!canDelete) {
+      return;
+    }
+
+    setMessage("");
+    setDeleteTarget(patient);
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (isSubmitting || !canCreate) {
+    if (isSubmitting || !canManage) {
       return;
     }
 
@@ -155,8 +219,10 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
     setMessage("");
 
     try {
-      const response = await fetch("/api/patients", {
-        method: "POST",
+      const endpoint = isEditing ? `/api/patients/${editingPatientId}` : "/api/patients";
+      const method = isEditing ? "PUT" : "POST";
+      const response = await fetch(endpoint, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json"
@@ -166,26 +232,64 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
       const payload = await readJsonSafely(response);
 
       if (!response.ok) {
-        throw new Error(payload?.error || `No se pudo crear el paciente. HTTP ${response.status}.`);
+        throw new Error(
+          payload?.error ||
+            `No se pudo ${isEditing ? "actualizar" : "crear"} el paciente. HTTP ${response.status}.`
+        );
       }
 
       setForm(buildInitialPatientForm(doctors));
       setMessageType("success");
-      setMessage(payload?.message || "Paciente creado.");
-      setIsOpen(false);
+      setMessage(payload?.message || (isEditing ? "Paciente actualizado." : "Paciente creado."));
+      closeFormModal();
       startTransition(() => {
         router.refresh();
       });
     } catch (error) {
       setMessageType("error");
-      setMessage(error instanceof Error ? error.message : "No se pudo crear el paciente.");
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar el paciente.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  const modal = isOpen ? (
-    <div className="sheet-backdrop sheet-backdrop--center" onClick={() => setIsOpen(false)}>
+  async function handleDelete() {
+    if (!deleteTarget || isDeleting || !canDelete) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(`/api/patients/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json"
+        }
+      });
+      const payload = await readJsonSafely(response);
+
+      if (!response.ok) {
+        throw new Error(payload?.error || `No se pudo eliminar el paciente. HTTP ${response.status}.`);
+      }
+
+      setMessageType("success");
+      setMessage(payload?.message || "Paciente eliminado.");
+      setDeleteTarget(null);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (error) {
+      setMessageType("error");
+      setMessage(error instanceof Error ? error.message : "No se pudo eliminar el paciente.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  const formModal = isFormOpen ? (
+    <div className="sheet-backdrop sheet-backdrop--center" onClick={closeFormModal}>
       <section
         className="sheet sheet--event"
         aria-modal="true"
@@ -196,15 +300,19 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
         <div className="sheet__header">
           <div>
             <p className="sheet__eyebrow">Pacientes</p>
-            <h2 id="patient-form-title">Crear paciente</h2>
+            <h2 id="patient-form-title">{isEditing ? "Editar paciente" : "Crear paciente"}</h2>
           </div>
-          <button type="button" className="sheet__close" onClick={() => setIsOpen(false)}>
+          <button type="button" className="sheet__close" onClick={closeFormModal}>
             Cerrar
           </button>
         </div>
 
         <form className="sheet-form" onSubmit={handleSubmit}>
-          <p className="sheet-copy">Completa los datos y el paciente quedara vinculado al profesional elegido.</p>
+          <p className="sheet-copy">
+            {isEditing
+              ? "Ajusta los datos del paciente y guarda los cambios en la base."
+              : "Completa los datos y el paciente quedara vinculado al profesional elegido."}
+          </p>
 
           <div className="sheet-form__grid">
             <label className="field field--stacked">
@@ -237,6 +345,16 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
                 value={form.insurance}
                 onChange={(event) => updateField("insurance", event.target.value)}
                 placeholder="OSDE 210"
+              />
+            </label>
+
+            <label className="field field--stacked">
+              <span>Plan</span>
+              <input
+                required
+                value={form.plan}
+                onChange={(event) => updateField("plan", event.target.value)}
+                placeholder="Plan A, Plan B, OSDE 2100"
               />
             </label>
 
@@ -301,20 +419,62 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
             <strong>{selectedDoctor ? selectedDoctor.name : "Sin doctor seleccionado"}</strong>
             <p>
               {selectedDoctor
-                ? `El paciente se guardara con la especialidad ${selectedDoctor.specialty}.`
-                : "Selecciona un doctor para completar el alta."}
+                ? `El paciente quedara asociado a ${selectedDoctor.specialty}. Plan sugerido del profesional: ${selectedDoctor.plan || "sin plan"}.`
+                : "Selecciona un doctor para completar el guardado."}
             </p>
           </div>
 
           <div className="sheet__actions">
-            <button type="button" className="secondary-button" onClick={() => setIsOpen(false)}>
+            <button type="button" className="secondary-button" onClick={closeFormModal}>
               Cancelar
             </button>
-            <button type="submit" className="primary-button" disabled={isSubmitting || !canCreate}>
-              {isSubmitting ? "Guardando..." : "Crear paciente"}
+            <button type="submit" className="primary-button" disabled={isSubmitting || !canManage}>
+              {isSubmitting ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear paciente"}
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  ) : null;
+
+  const deleteModal = deleteTarget ? (
+    <div className="sheet-backdrop sheet-backdrop--center" onClick={() => setDeleteTarget(null)}>
+      <section
+        className="sheet sheet--event"
+        aria-modal="true"
+        role="dialog"
+        aria-labelledby="patient-delete-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sheet__header">
+          <div>
+            <p className="sheet__eyebrow">Pacientes</p>
+            <h2 id="patient-delete-title">Eliminar paciente</h2>
+          </div>
+          <button type="button" className="sheet__close" onClick={() => setDeleteTarget(null)}>
+            Cerrar
+          </button>
+        </div>
+
+        <div className="sheet-form">
+          <p className="sheet-copy">
+            Vas a eliminar a <strong>{deleteTarget.name}</strong>. Esta accion no se puede deshacer.
+          </p>
+
+          <div className="sheet-callout">
+            <strong>{deleteTarget.doctor}</strong>
+            <p>Plan del paciente: {deleteTarget.plan || "Sin plan cargado"}. Revisa la ficha antes de confirmar la baja.</p>
+          </div>
+
+          <div className="sheet__actions">
+            <button type="button" className="secondary-button" onClick={() => setDeleteTarget(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="danger-button" onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting ? "Eliminando..." : "Eliminar paciente"}
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   ) : null;
@@ -326,8 +486,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
           <p className="hero-panel__eyebrow">Pacientes y seguimiento</p>
           <h1>Pacientes</h1>
           <p className="hero-panel__copy">
-            Busqueda rapida por nombre, doctor o cobertura. Esta ruta ahora tambien permite cargar altas
-            reales y persistirlas en Neon.
+            Busqueda rapida por nombre, doctor o cobertura. Esta ruta ya permite alta, edicion y baja
+            persistida de pacientes cuando la base esta conectada.
           </p>
         </div>
 
@@ -338,7 +498,7 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
           <h2>{patients.length} historias</h2>
           <p>
             {storage?.connected
-              ? "Listado operativo para admision, seguimiento y altas nuevas persistidas."
+              ? "Listado operativo para admision, seguimiento y cambios persistidos en la base."
               : storage?.error || "Sin base de datos conectada, esta ruta queda solo de lectura."}
           </p>
         </div>
@@ -346,8 +506,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
 
       <section className="content-card">
         <div className="content-card__header">
-          <h2>Alta de paciente</h2>
-          <button type="button" className="primary-button" onClick={openModal} disabled={!canCreate}>
+          <h2>Gestion de pacientes</h2>
+          <button type="button" className="primary-button" onClick={openCreateModal} disabled={!canManage}>
             Crear paciente
           </button>
         </div>
@@ -360,24 +520,22 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
 
         {!storage?.connected ? (
           <div className="inline-message inline-message--error">
-            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar altas reales."}
+            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar cambios reales."}
           </div>
         ) : null}
 
         {storage?.connected && doctors.length === 0 ? (
           <div className="inline-message inline-message--error">
-            Primero crea al menos un doctor. Sin profesional no puedo vincular el paciente a la base.
+            Primero crea al menos un doctor. Sin profesional no puedo vincular ni editar pacientes.
           </div>
         ) : null}
-
-
       </section>
 
       <section className="content-card">
         <div className="content-card__header">
           <div>
             <h2>Listado de pacientes</h2>
-            <p>Filtra por obra social o profesional para limpiar la vista.</p>
+            <p>Filtra por obra social o profesional para limpiar la vista. La busqueda tambien contempla el plan.</p>
           </div>
           <span className="content-card__meta">{visiblePatients.length} visibles</span>
         </div>
@@ -449,7 +607,7 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
 
                   <div>
                     <strong>{patient.insurance}</strong>
-                    <small>{patient.specialty}</small>
+                    <small>{patient.plan || "Sin plan"}</small>
                   </div>
 
                   <div>
@@ -462,6 +620,24 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
                       {PATIENT_STATUS_COPY[patient.status]?.label || patient.status}
                     </span>
                     <small>Proximo turno {patient.nextAppointment}</small>
+                    <div className="record-row__actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        onClick={() => openEditModal(patient)}
+                        disabled={!canManage}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-button"
+                        onClick={() => openDeleteModal(patient)}
+                        disabled={!canDelete}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -470,7 +646,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
         )}
       </section>
 
-      {modal && typeof document !== "undefined" ? createPortal(modal, document.body) : null}
+      {formModal && typeof document !== "undefined" ? createPortal(formModal, document.body) : null}
+      {deleteModal && typeof document !== "undefined" ? createPortal(deleteModal, document.body) : null}
     </>
   );
 }

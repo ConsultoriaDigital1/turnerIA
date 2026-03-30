@@ -442,6 +442,7 @@ code {
 
 .primary-button,
 .secondary-button,
+.danger-button,
 .sheet__close {
   display: inline-flex;
   align-items: center;
@@ -467,8 +468,15 @@ code {
   color: var(--navy);
 }
 
+.danger-button {
+  border-color: rgba(185, 28, 28, 0.18);
+  background: rgba(185, 28, 28, 0.1);
+  color: #8f1d1d;
+}
+
 .primary-button:hover,
 .secondary-button:hover,
+.danger-button:hover,
 .sheet__close:hover {
   transform: translateY(-1px);
 }
@@ -484,7 +492,9 @@ code {
   height: 20px;
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled {
   opacity: 0.65;
   cursor: wait;
 }
@@ -685,6 +695,14 @@ code {
   text-align: right;
 }
 
+.record-row__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.85rem;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -822,6 +840,13 @@ code {
 .doctor-card__meta {
   display: grid;
   gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+.doctor-card__actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
   margin-top: 1rem;
 }
 
@@ -1340,6 +1365,11 @@ html[data-motion="reduced"] .nav-card:hover {
   .record-row__amount,
   .record-row__sync {
     text-align: left;
+  }
+
+  .record-row__actions,
+  .doctor-card__actions {
+    justify-content: flex-start;
   }
 
   .list-row {

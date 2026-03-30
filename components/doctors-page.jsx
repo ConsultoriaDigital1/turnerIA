@@ -1,6 +1,6 @@
 "use client";
 
-// Aca renderizo la vista de profesionales y permito altas persistidas en Neon.
+// Aca renderizo la vista de profesionales y permito CRUD persistido en Neon.
 
 import { startTransition, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -12,8 +12,21 @@ function buildInitialDoctorForm() {
     specialty: "",
     room: "",
     shift: "",
+    plan: "",
     insurances: "",
     notes: ""
+  };
+}
+
+function buildDoctorForm(doctor) {
+  return {
+    name: doctor.name || "",
+    specialty: doctor.specialty || "",
+    room: doctor.room || "",
+    shift: doctor.shift || "",
+    plan: doctor.plan || "",
+    insurances: Array.isArray(doctor.insurances) ? doctor.insurances.join(", ") : "",
+    notes: doctor.notes || ""
   };
 }
 
@@ -36,20 +49,27 @@ async function readJsonSafely(response) {
 export function DoctorsPage({ doctors, storage }) {
   const router = useRouter();
   const [form, setForm] = useState(buildInitialDoctorForm);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState("create");
+  const [editingDoctorId, setEditingDoctorId] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
-  const canCreate = Boolean(storage?.writable);
+  const canManage = Boolean(storage?.writable);
+  const isEditing = formMode === "edit";
+  const isOverlayOpen = isFormOpen || Boolean(deleteTarget);
 
   useEffect(() => {
-    if (!isOpen) {
+    if (!isOverlayOpen) {
       return undefined;
     }
 
     function handleKeyDown(event) {
       if (event.key === "Escape") {
-        setIsOpen(false);
+        setIsFormOpen(false);
+        setDeleteTarget(null);
       }
     }
 
@@ -62,7 +82,7 @@ export function DoctorsPage({ doctors, storage }) {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen]);
+  }, [isOverlayOpen]);
 
   function updateField(key, value) {
     setForm((current) => ({
@@ -71,19 +91,49 @@ export function DoctorsPage({ doctors, storage }) {
     }));
   }
 
-  function openModal() {
-    if (!canCreate) {
+  function closeFormModal() {
+    setIsFormOpen(false);
+    setFormMode("create");
+    setEditingDoctorId("");
+  }
+
+  function openCreateModal() {
+    if (!canManage) {
       return;
     }
 
     setMessage("");
-    setIsOpen(true);
+    setFormMode("create");
+    setEditingDoctorId("");
+    setForm(buildInitialDoctorForm());
+    setIsFormOpen(true);
+  }
+
+  function openEditModal(doctor) {
+    if (!canManage) {
+      return;
+    }
+
+    setMessage("");
+    setFormMode("edit");
+    setEditingDoctorId(doctor.id);
+    setForm(buildDoctorForm(doctor));
+    setIsFormOpen(true);
+  }
+
+  function openDeleteModal(doctor) {
+    if (!canManage) {
+      return;
+    }
+
+    setMessage("");
+    setDeleteTarget(doctor);
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (isSubmitting || !canCreate) {
+    if (isSubmitting || !canManage) {
       return;
     }
 
@@ -91,8 +141,10 @@ export function DoctorsPage({ doctors, storage }) {
     setMessage("");
 
     try {
-      const response = await fetch("/api/doctors", {
-        method: "POST",
+      const endpoint = isEditing ? `/api/doctors/${editingDoctorId}` : "/api/doctors";
+      const method = isEditing ? "PUT" : "POST";
+      const response = await fetch(endpoint, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json"
@@ -102,26 +154,63 @@ export function DoctorsPage({ doctors, storage }) {
       const payload = await readJsonSafely(response);
 
       if (!response.ok) {
-        throw new Error(payload?.error || `No se pudo crear el doctor. HTTP ${response.status}.`);
+        throw new Error(
+          payload?.error || `No se pudo ${isEditing ? "actualizar" : "crear"} el doctor. HTTP ${response.status}.`
+        );
       }
 
       setForm(buildInitialDoctorForm());
       setMessageType("success");
-      setMessage(payload?.message || "Doctor creado.");
-      setIsOpen(false);
+      setMessage(payload?.message || (isEditing ? "Doctor actualizado." : "Doctor creado."));
+      closeFormModal();
       startTransition(() => {
         router.refresh();
       });
     } catch (error) {
       setMessageType("error");
-      setMessage(error instanceof Error ? error.message : "No se pudo crear el doctor.");
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar el doctor.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  const modal = isOpen ? (
-    <div className="sheet-backdrop sheet-backdrop--center" onClick={() => setIsOpen(false)}>
+  async function handleDelete() {
+    if (!deleteTarget || isDeleting || !canManage) {
+      return;
+    }
+
+    setIsDeleting(true);
+    setMessage("");
+
+    try {
+      const response = await fetch(`/api/doctors/${deleteTarget.id}`, {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json"
+        }
+      });
+      const payload = await readJsonSafely(response);
+
+      if (!response.ok) {
+        throw new Error(payload?.error || `No se pudo eliminar el doctor. HTTP ${response.status}.`);
+      }
+
+      setMessageType("success");
+      setMessage(payload?.message || "Doctor eliminado.");
+      setDeleteTarget(null);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (error) {
+      setMessageType("error");
+      setMessage(error instanceof Error ? error.message : "No se pudo eliminar el doctor.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  const formModal = isFormOpen ? (
+    <div className="sheet-backdrop sheet-backdrop--center" onClick={closeFormModal}>
       <section
         className="sheet"
         aria-modal="true"
@@ -132,15 +221,19 @@ export function DoctorsPage({ doctors, storage }) {
         <div className="sheet__header">
           <div>
             <p className="sheet__eyebrow">Profesionales</p>
-            <h2 id="doctor-form-title">Crear doctor</h2>
+            <h2 id="doctor-form-title">{isEditing ? "Editar doctor" : "Crear doctor"}</h2>
           </div>
-          <button type="button" className="sheet__close" onClick={() => setIsOpen(false)}>
+          <button type="button" className="sheet__close" onClick={closeFormModal}>
             Cerrar
           </button>
         </div>
 
         <form className="sheet-form" onSubmit={handleSubmit}>
-          <p className="sheet-copy">Carga nombre, especialidad, consultorio, horario y coberturas aceptadas.</p>
+          <p className="sheet-copy">
+            {isEditing
+              ? "Actualiza la ficha del profesional y guarda los cambios en la base."
+              : "Carga nombre, especialidad, consultorio, horario, plan y coberturas aceptadas."}
+          </p>
 
           <div className="sheet-form__grid">
             <label className="field field--stacked">
@@ -184,15 +277,27 @@ export function DoctorsPage({ doctors, storage }) {
             </label>
           </div>
 
-          <label className="field field--stacked">
-            <span>Obras sociales</span>
-            <input
-              required
-              value={form.insurances}
-              onChange={(event) => updateField("insurances", event.target.value)}
-              placeholder="OSDE, Galeno, Particular"
-            />
-          </label>
+          <div className="sheet-form__grid">
+            <label className="field field--stacked">
+              <span>Plan</span>
+              <input
+                required
+                value={form.plan}
+                onChange={(event) => updateField("plan", event.target.value)}
+                placeholder="Plan A, Plan B, OSDE 2100"
+              />
+            </label>
+
+            <label className="field field--stacked">
+              <span>Obras sociales</span>
+              <input
+                required
+                value={form.insurances}
+                onChange={(event) => updateField("insurances", event.target.value)}
+                placeholder="OSDE, Galeno, Particular"
+              />
+            </label>
+          </div>
 
           <label className="field field--stacked">
             <span>Notas</span>
@@ -205,14 +310,56 @@ export function DoctorsPage({ doctors, storage }) {
           </label>
 
           <div className="sheet__actions">
-            <button type="button" className="secondary-button" onClick={() => setIsOpen(false)}>
+            <button type="button" className="secondary-button" onClick={closeFormModal}>
               Cancelar
             </button>
-            <button type="submit" className="primary-button" disabled={isSubmitting || !canCreate}>
-              {isSubmitting ? "Guardando..." : "Crear doctor"}
+            <button type="submit" className="primary-button" disabled={isSubmitting || !canManage}>
+              {isSubmitting ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear doctor"}
             </button>
           </div>
         </form>
+      </section>
+    </div>
+  ) : null;
+
+  const deleteModal = deleteTarget ? (
+    <div className="sheet-backdrop sheet-backdrop--center" onClick={() => setDeleteTarget(null)}>
+      <section
+        className="sheet sheet--event"
+        aria-modal="true"
+        role="dialog"
+        aria-labelledby="doctor-delete-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sheet__header">
+          <div>
+            <p className="sheet__eyebrow">Profesionales</p>
+            <h2 id="doctor-delete-title">Eliminar doctor</h2>
+          </div>
+          <button type="button" className="sheet__close" onClick={() => setDeleteTarget(null)}>
+            Cerrar
+          </button>
+        </div>
+
+        <div className="sheet-form">
+          <p className="sheet-copy">
+            Vas a eliminar a <strong>{deleteTarget.name}</strong>. Esta accion no se puede deshacer.
+          </p>
+
+          <div className="sheet-callout">
+            <strong>{deleteTarget.specialty}</strong>
+            <p>Plan actual: {deleteTarget.plan || "Sin plan cargado"}. Si tiene pacientes vinculados, el backend va a bloquear la baja.</p>
+          </div>
+
+          <div className="sheet__actions">
+            <button type="button" className="secondary-button" onClick={() => setDeleteTarget(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="danger-button" onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting ? "Eliminando..." : "Eliminar doctor"}
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   ) : null;
@@ -224,8 +371,8 @@ export function DoctorsPage({ doctors, storage }) {
           <p className="hero-panel__eyebrow">Profesionales</p>
           <h1>Doctores</h1>
           <p className="hero-panel__copy">
-            Informacion separada por ruta: especialidad, consultorio, horario y obras sociales de cada
-            profesional. Desde aca tambien puedes dar de alta nuevas fichas persistidas en Neon.
+            Informacion separada por ruta: especialidad, consultorio, horario, plan y obras sociales de
+            cada profesional. Desde aca ya puedes crear, editar y eliminar fichas persistidas en Neon.
           </p>
         </div>
 
@@ -236,7 +383,7 @@ export function DoctorsPage({ doctors, storage }) {
           <h2>{doctors.length} profesionales</h2>
           <p>
             {storage?.connected
-              ? "Las altas nuevas se guardan en la base de datos de la empresa."
+              ? "Las altas, ediciones y bajas se guardan en la base de datos de la empresa."
               : storage?.error || "Sin base de datos conectada, la pantalla queda solo de lectura."}
           </p>
         </div>
@@ -244,8 +391,8 @@ export function DoctorsPage({ doctors, storage }) {
 
       <section className="content-card">
         <div className="content-card__header">
-          <h2>Alta de doctor</h2>
-          <button type="button" className="primary-button" onClick={openModal} disabled={!canCreate}>
+          <h2>Gestion de doctores</h2>
+          <button type="button" className="primary-button" onClick={openCreateModal} disabled={!canManage}>
             Crear doctor
           </button>
         </div>
@@ -256,9 +403,9 @@ export function DoctorsPage({ doctors, storage }) {
           </div>
         ) : null}
 
-        {!canCreate ? (
+        {!canManage ? (
           <div className="inline-message inline-message--error">
-            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar altas reales."}
+            {storage?.error || "Falta configurar DATABASE_URL o POSTGRES_URL para habilitar cambios reales."}
           </div>
         ) : null}
       </section>
@@ -267,7 +414,7 @@ export function DoctorsPage({ doctors, storage }) {
         <div className="content-card__header">
           <div>
             <h2>Datos de doctores</h2>
-            <p>Especialidad, horarios, consultorio y coberturas aceptadas.</p>
+            <p>Especialidad, horarios, plan, consultorio y coberturas aceptadas.</p>
           </div>
           <span className="content-card__meta">{doctors.length} fichas</span>
         </div>
@@ -288,6 +435,10 @@ export function DoctorsPage({ doctors, storage }) {
                   <span>Horario</span>
                   <strong>{doctor.shift}</strong>
                 </div>
+                <div className="info-line">
+                  <span>Plan</span>
+                  <strong>{doctor.plan || "Sin plan"}</strong>
+                </div>
                 <p className="subtle-copy">{doctor.notes}</p>
               </div>
 
@@ -298,12 +449,32 @@ export function DoctorsPage({ doctors, storage }) {
                   </span>
                 ))}
               </div>
+
+              <div className="doctor-card__actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => openEditModal(doctor)}
+                  disabled={!canManage}
+                >
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  onClick={() => openDeleteModal(doctor)}
+                  disabled={!canManage}
+                >
+                  Eliminar
+                </button>
+              </div>
             </article>
           ))}
         </div>
       </section>
 
-      {modal && typeof document !== "undefined" ? createPortal(modal, document.body) : null}
+      {formModal && typeof document !== "undefined" ? createPortal(formModal, document.body) : null}
+      {deleteModal && typeof document !== "undefined" ? createPortal(deleteModal, document.body) : null}
     </>
   );
 }
