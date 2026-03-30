@@ -31,6 +31,8 @@ export async function middleware(request) {
     return NextResponse.next();
   }
 
+  // Aca permito el acceso a integraciones externas como n8n usando el header x-api-key.
+  // La clave se configura en la variable de entorno API_SECRET_KEY.
   const apiKey = request.headers.get("x-api-key");
 
   if (apiKey && verifyApiKey(apiKey)) {

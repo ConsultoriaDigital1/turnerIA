@@ -12,6 +12,8 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const phone = searchParams.get("phone");
 
+  // Si viene el parametro ?phone= busco solo ese paciente, util para n8n.
+  // Busca por los digitos del final del telefono, tolera cualquier formato.
   if (phone) {
     const patients = await getClinicPatients({ phone });
     return NextResponse.json({ patients });
