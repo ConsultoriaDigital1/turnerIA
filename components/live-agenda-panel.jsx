@@ -21,7 +21,7 @@ export function LiveAgendaPanel({ initialCalendar, initialAgendaMeta }) {
   const inFlightRef = useRef(false);
 
   // Aca centralizo el refresh para usarlo igual en auto-refresh, boton manual y eventos internos.
-const refreshAgenda = useCallback(
+  const refreshAgenda = useCallback(
     async ({ silent = false } = {}) => {
       if (inFlightRef.current) {
         return;
@@ -86,6 +86,7 @@ const refreshAgenda = useCallback(
       <div className="content-card__header">
         <div>
           <h2>Agenda del consultorio</h2>
+          {agendaMeta?.note ? <p>{agendaMeta.note}</p> : null}
         </div>
 
         <div className="stack-grid">
