@@ -339,9 +339,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
             </label>
 
             <label className="field field--stacked">
-              <span>Obra social</span>
+              <span>Obra social <small>(opcional)</small></span>
               <input
-                required
                 value={form.insurance}
                 onChange={(event) => updateField("insurance", event.target.value)}
                 placeholder="OSDE 210"
@@ -349,9 +348,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
             </label>
 
             <label className="field field--stacked">
-              <span>Plan</span>
+              <span>Plan <small>(opcional)</small></span>
               <input
-                required
                 value={form.plan}
                 onChange={(event) => updateField("plan", event.target.value)}
                 placeholder="Plan A, Plan B, OSDE 2100"
@@ -385,9 +383,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
             </label>
 
             <label className="field field--stacked">
-              <span>Ultima visita</span>
+              <span>Ultima visita <small>(opcional)</small></span>
               <input
-                required
                 type="date"
                 value={form.lastVisit}
                 onChange={(event) => updateField("lastVisit", event.target.value)}
@@ -395,9 +392,8 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
             </label>
 
             <label className="field field--stacked">
-              <span>Proximo turno</span>
+              <span>Proximo turno <small>(opcional)</small></span>
               <input
-                required
                 type="datetime-local"
                 value={normalizeDateTimeInput(form.nextAppointment)}
                 onChange={(event) => updateField("nextAppointment", event.target.value)}
