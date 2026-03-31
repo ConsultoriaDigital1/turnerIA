@@ -14,6 +14,30 @@ function isPublicApiPath(pathname) {
   return pathname === "/api/auth/login" || pathname === "/api/auth/logout";
 }
 
+// Rate limiting en memoria. En Vercel es por instancia, no global, pero igual frena abusos basicos.
+const rateLimitStore = new Map();
+
+function checkRateLimit(key, limit, windowMs) {
+  const now = Date.now();
+  const entry = rateLimitStore.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  if (entry.count >= limit) {
+    return false;
+  }
+
+  entry.count++;
+  return true;
+}
+
+function getClientIp(request) {
+  return request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
+}
+
 // Aca valido la sesion en cada request privada y redirijo a login si falta auth.
 export async function middleware(request) {
   const { pathname, search } = request.nextUrl;
@@ -28,6 +52,14 @@ export async function middleware(request) {
       }
     }
 
+    // Anti brute-force: max 10 intentos de login por IP por minuto.
+    if (pathname === "/api/auth/login") {
+      const ip = getClientIp(request);
+      if (!checkRateLimit(`login:${ip}`, 10, 60_000)) {
+        return NextResponse.json({ error: "Demasiados intentos. Esperá un momento." }, { status: 429 });
+      }
+    }
+
     return NextResponse.next();
   }
 
@@ -36,6 +68,10 @@ export async function middleware(request) {
   const apiKey = request.headers.get("x-api-key");
 
   if (apiKey && verifyApiKey(apiKey)) {
+    // Max 60 llamadas por minuto por API key (n8n manda ~3-5 por mensaje de WhatsApp).
+    if (!checkRateLimit(`apikey:${apiKey}`, 60, 60_000)) {
+      return NextResponse.json({ error: "Rate limit excedido." }, { status: 429 });
+    }
     return NextResponse.next();
   }
 
