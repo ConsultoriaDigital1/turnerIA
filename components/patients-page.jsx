@@ -503,9 +503,18 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
       <section className="content-card">
         <div className="content-card__header">
           <h2>Gestion de pacientes</h2>
-          <button type="button" className="primary-button" onClick={openCreateModal} disabled={!canManage}>
-            Crear paciente
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => startTransition(() => router.refresh())}
+            >
+              Actualizar
+            </button>
+            <button type="button" className="primary-button" onClick={openCreateModal} disabled={!canManage}>
+              Crear paciente
+            </button>
+          </div>
         </div>
 
         {message ? (
@@ -597,7 +606,7 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
                   <div className="record-row__main">
                     <strong>{patient.name}</strong>
                     <p>
-                      {patient.age} anos | {patient.phone}
+                      {patient.age != null ? `${patient.age} anos` : "Edad no registrada"} | {patient.phone}
                     </p>
                     <small>Ultima visita {formatShortSpanishDate(patient.lastVisit)}</small>
                   </div>
