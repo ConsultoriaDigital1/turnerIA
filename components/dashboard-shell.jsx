@@ -39,15 +39,12 @@ export function DashboardShell({ children }) {
     <div className="shell notranslate" translate="no" suppressHydrationWarning>
       <aside className="shell__sidebar">
         <Link href="/" className="brand-card">
-          <div className="brand-card__stamp" aria-hidden="true">
-            <span>CONSULTORIA</span>
-            <span>DIGITAL</span>
-          </div>
-
-          <div>
-            <p className="brand-card__eyebrow">agenda medica inteligente</p>
-            <h2 className="brand-card__title">{APP_NAME}</h2>
-          </div>
+          <img
+            src="/turneria-logo.png"
+            alt={`${APP_NAME} Agenda Medica Inteligente`}
+            className="brand-card__logo"
+            style={{ width: "100%", height: "auto", display: "block" }}
+          />
         </Link>
 
         <div className="sidebar-section">
