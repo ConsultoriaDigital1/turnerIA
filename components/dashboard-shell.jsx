@@ -6,8 +6,9 @@ import { startTransition, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
+import { BrandLogo } from "@/components/brand-logo";
 import { SettingsPopup } from "@/components/settings-popup";
-import { APP_NAME, NAVIGATION } from "@/lib/navigation";
+import { NAVIGATION } from "@/lib/navigation";
 
 export function DashboardShell({ children }) {
   const pathname = usePathname();
@@ -39,12 +40,7 @@ export function DashboardShell({ children }) {
     <div className="shell notranslate" translate="no" suppressHydrationWarning>
       <aside className="shell__sidebar">
         <Link href="/" className="brand-card">
-          <img
-            src="/turneria-logo.png"
-            alt={`${APP_NAME} Agenda Medica Inteligente`}
-            className="brand-card__logo"
-            style={{ width: "100%", height: "auto", display: "block" }}
-          />
+          <BrandLogo className="brand-card__logo" priority sizes="268px" />
         </Link>
 
         <div className="sidebar-section">

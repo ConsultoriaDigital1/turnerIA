@@ -5,6 +5,10 @@
 import { useSearchParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { BrandLogo } from "@/components/brand-logo";
+
+const LOGIN_COPY = "Gestion\u00E1 tus turnos de forma simple y ordenada. Acced\u00E9 a tu panel para administrar reservas, clientes y disponibilidad en un solo lugar.";
+
 export function LoginForm({ authConfigured, defaultEmail }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -66,15 +70,14 @@ export function LoginForm({ authConfigured, defaultEmail }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-card__brand">
-          <img
-            src="/turneria-logo.png"
-            alt="TurnerIA Agenda Medica Inteligente"
-            className="login-card__logo"
-            style={{ width: "100%", height: "auto", display: "block" }}
-          />
-          <p className="subtle-copy">
-            Acceso privado por JWT. El resto de la app queda bloqueado hasta iniciar sesion.
-          </p>
+          <div className="login-card__logo-shell">
+            <BrandLogo
+              className="login-card__logo"
+              priority
+              sizes="(max-width: 560px) calc(100vw - 80px), 420px"
+            />
+          </div>
+          <p className="subtle-copy login-card__copy">{LOGIN_COPY}</p>
         </div>
 
         {!authConfigured ? (
