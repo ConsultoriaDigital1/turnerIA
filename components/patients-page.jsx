@@ -36,7 +36,6 @@ function buildInitialPatientForm(doctors) {
     doctorId: doctors[0]?.id || "",
     phone: "",
     lastVisit: "",
-    nextAppointment: "",
     status: "active"
   };
 }
@@ -61,9 +60,31 @@ function buildPatientForm(patient, doctors) {
     doctorId,
     phone: patient.phone || "",
     lastVisit: patient.lastVisit || "",
-    nextAppointment: patient.nextAppointment || "",
     status: patient.status || "active"
   };
+}
+
+function formatHistoryTimestamp(value) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+
+  if (!normalized) {
+    return "";
+  }
+
+  const safeValue = normalized.includes("T") ? normalized : normalized.replace(" ", "T");
+  const parsed = new Date(safeValue);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return normalized;
+  }
+
+  return new Intl.DateTimeFormat("es-AR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(parsed);
 }
 
 function normalizeDateTimeInput(value) {
@@ -74,6 +95,61 @@ function normalizeDateTimeInput(value) {
   }
 
   return normalized.includes("T") ? normalized.slice(0, 16) : normalized.replace(" ", "T").slice(0, 16);
+}
+
+function getRoundedDateTimeInput(baseDate = new Date()) {
+  const nextDate = new Date(baseDate);
+
+  nextDate.setSeconds(0, 0);
+  nextDate.setMinutes(Math.ceil(nextDate.getMinutes() / 5) * 5);
+
+  const year = nextDate.getFullYear();
+  const month = String(nextDate.getMonth() + 1).padStart(2, "0");
+  const day = String(nextDate.getDate()).padStart(2, "0");
+  const hours = String(nextDate.getHours()).padStart(2, "0");
+  const minutes = String(nextDate.getMinutes()).padStart(2, "0");
+
+  return year + "-" + month + "-" + day + "T" + hours + ":" + minutes;
+}
+
+function buildInitialHistoryForm(defaultDoctorId = "") {
+  return {
+    visitAt: getRoundedDateTimeInput(),
+    doctorId: defaultDoctorId,
+    reason: "",
+    notes: "",
+    observations: "",
+    requestedStudies: ""
+  };
+}
+
+function buildHistoryForm(entry, defaultDoctorId = "") {
+  return {
+    visitAt: normalizeDateTimeInput(entry?.visitAt || entry?.visitDate),
+    doctorId: entry?.doctorId || defaultDoctorId,
+    reason: entry?.reason || "",
+    notes: entry?.notes || "",
+    observations: entry?.observations || "",
+    requestedStudies: Array.isArray(entry?.requestedStudies) ? entry.requestedStudies.join("\n") : entry?.requestedStudies || ""
+  };
+}
+
+function getHistorySortTime(entry) {
+  const visitValue = typeof entry?.visitAt === "string" ? entry.visitAt.trim() : "";
+  const createdValue = typeof entry?.createdAt === "string" ? entry.createdAt.trim() : "";
+  const rawValue = visitValue || createdValue;
+
+  if (!rawValue) {
+    return 0;
+  }
+
+  const parsed = new Date(rawValue.includes("T") ? rawValue : rawValue.replace(" ", "T"));
+
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function sortHistoryEntries(entries) {
+  return [...entries].sort((leftEntry, rightEntry) => getHistorySortTime(rightEntry) - getHistorySortTime(leftEntry));
 }
 
 async function readJsonSafely(response) {
@@ -106,10 +182,20 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
+  const [historyEntries, setHistoryEntries] = useState([]);
+  const [historyForm, setHistoryForm] = useState(() => buildInitialHistoryForm(doctors[0]?.id || ""));
+  const [editingHistoryId, setEditingHistoryId] = useState("");
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [isHistorySubmitting, setIsHistorySubmitting] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [historyMessage, setHistoryMessage] = useState("");
+  const [historyMessageType, setHistoryMessageType] = useState("success");
   const deferredSearch = useDeferredValue(search);
   const canManage = Boolean(storage?.writable) && doctors.length > 0;
+  const canManageHistory = Boolean(storage?.writable);
   const canDelete = Boolean(storage?.writable);
   const isEditing = formMode === "edit";
+  const isPatientReadOnly = isEditing && !canManage;
   const selectedDoctor = doctors.find((doctorOption) => doctorOption.id === form.doctorId) || null;
   const isOverlayOpen = isFormOpen || Boolean(deleteTarget);
 
@@ -127,13 +213,26 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
   }, [doctors]);
 
   useEffect(() => {
+    setHistoryForm((current) => {
+      if (!current.doctorId || doctors.some((doctorOption) => doctorOption.id === current.doctorId)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        doctorId: doctors[0]?.id || ""
+      };
+    });
+  }, [doctors]);
+
+  useEffect(() => {
     if (!isOverlayOpen) {
       return undefined;
     }
 
     function handleKeyDown(event) {
       if (event.key === "Escape") {
-        setIsFormOpen(false);
+        closeFormModal();
         setDeleteTarget(null);
       }
     }
@@ -148,6 +247,53 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOverlayOpen]);
+
+  useEffect(() => {
+    if (!isFormOpen || !isEditing || !editingPatientId) {
+      resetHistoryState();
+      return undefined;
+    }
+
+    let isCancelled = false;
+
+    async function loadPatientHistory() {
+      setIsHistoryLoading(true);
+      setHistoryError("");
+      setHistoryMessage("");
+
+      try {
+        const response = await fetch("/api/patients/" + editingPatientId + "/history", {
+          headers: {
+            Accept: "application/json"
+          }
+        });
+        const payload = await readJsonSafely(response);
+
+        if (!response.ok) {
+          throw new Error(payload?.error || "No se pudo leer el historial del paciente. HTTP " + response.status + ".");
+        }
+
+        if (!isCancelled) {
+          setHistoryEntries(sortHistoryEntries(Array.isArray(payload?.history) ? payload.history : []));
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setHistoryEntries([]);
+          setHistoryError(error instanceof Error ? error.message : "No se pudo leer el historial del paciente.");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsHistoryLoading(false);
+        }
+      }
+    }
+
+    loadPatientHistory();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [editingPatientId, isEditing, isFormOpen]);
 
   const visiblePatients = patients.filter((patient) => {
     const matchesSearch =
@@ -169,10 +315,33 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
     }));
   }
 
+  function updateHistoryField(key, value) {
+    setHistoryForm((current) => ({
+      ...current,
+      [key]: value
+    }));
+  }
+
+  function resetHistoryComposer(defaultDoctorId = "") {
+    setEditingHistoryId("");
+    setHistoryForm(buildInitialHistoryForm(defaultDoctorId));
+    setHistoryMessage("");
+    setHistoryMessageType("success");
+    setIsHistorySubmitting(false);
+  }
+
+  function resetHistoryState(defaultDoctorId = "") {
+    setHistoryEntries([]);
+    setHistoryError("");
+    setIsHistoryLoading(false);
+    resetHistoryComposer(defaultDoctorId);
+  }
+
   function closeFormModal() {
     setIsFormOpen(false);
     setFormMode("create");
     setEditingPatientId("");
+    resetHistoryState();
   }
 
   function openCreateModal() {
@@ -184,19 +353,34 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
     setFormMode("create");
     setEditingPatientId("");
     setForm(buildInitialPatientForm(doctors));
+    resetHistoryState(doctors[0]?.id || "");
     setIsFormOpen(true);
   }
 
   function openEditModal(patient) {
-    if (!canManage) {
-      return;
-    }
+    const patientForm = buildPatientForm(patient, doctors);
 
     setMessage("");
     setFormMode("edit");
     setEditingPatientId(patient.id);
-    setForm(buildPatientForm(patient, doctors));
+    setForm(patientForm);
+    resetHistoryState(patientForm.doctorId || "");
     setIsFormOpen(true);
+  }
+
+  function startNewHistoryEntry() {
+    resetHistoryComposer(form.doctorId || "");
+  }
+
+  function startHistoryEdit(entry) {
+    setHistoryMessage("");
+    setHistoryMessageType("success");
+    setEditingHistoryId(entry.id);
+    setHistoryForm(buildHistoryForm(entry, entry.doctorId || form.doctorId || ""));
+  }
+
+  function applyQuickHistoryTime(nextValue) {
+    updateHistoryField("visitAt", nextValue);
   }
 
   function openDeleteModal(patient) {
@@ -206,6 +390,66 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
 
     setMessage("");
     setDeleteTarget(patient);
+  }
+
+  async function handleHistorySubmit(event) {
+    event.preventDefault();
+
+    if (!editingPatientId || isHistorySubmitting || !canManageHistory) {
+      return;
+    }
+
+    const isEditingHistoryEntry = Boolean(editingHistoryId);
+
+    setIsHistorySubmitting(true);
+    setHistoryError("");
+    setHistoryMessage("");
+
+    try {
+      const endpoint = isEditingHistoryEntry
+        ? "/api/patients/" + editingPatientId + "/history/" + editingHistoryId
+        : "/api/patients/" + editingPatientId + "/history";
+      const method = isEditingHistoryEntry ? "PUT" : "POST";
+      const response = await fetch(endpoint, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify(historyForm)
+      });
+      const payload = await readJsonSafely(response);
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error ||
+            "No se pudo " + (isEditingHistoryEntry ? "actualizar" : "guardar") + " la visita. HTTP " + response.status + "."
+        );
+      }
+
+      const savedEntry = payload?.entry;
+
+      if (!savedEntry?.id) {
+        throw new Error("La API devolvio una respuesta incompleta para el historial del paciente.");
+      }
+
+      setHistoryEntries((current) =>
+        sortHistoryEntries(
+          isEditingHistoryEntry
+            ? current.map((entry) => (entry.id === savedEntry.id ? savedEntry : entry))
+            : [savedEntry, ...current]
+        )
+      );
+      setEditingHistoryId("");
+      setHistoryForm(buildInitialHistoryForm(form.doctorId || savedEntry.doctorId || ""));
+      setHistoryMessageType("success");
+      setHistoryMessage(payload?.message || (isEditingHistoryEntry ? "Visita actualizada." : "Visita agregada."));
+    } catch (error) {
+      setHistoryMessageType("error");
+      setHistoryMessage(error instanceof Error ? error.message : "No se pudo guardar la visita.");
+    } finally {
+      setIsHistorySubmitting(false);
+    }
   }
 
   async function handleSubmit(event) {
@@ -291,7 +535,7 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
   const formModal = isFormOpen ? (
     <div className="sheet-backdrop sheet-backdrop--center" onClick={closeFormModal}>
       <section
-        className="sheet sheet--event"
+        className="sheet sheet--event sheet--patient"
         aria-modal="true"
         role="dialog"
         aria-labelledby="patient-form-title"
@@ -300,138 +544,373 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
         <div className="sheet__header">
           <div>
             <p className="sheet__eyebrow">Pacientes</p>
-            <h2 id="patient-form-title">{isEditing ? "Editar paciente" : "Crear paciente"}</h2>
+            <h2 id="patient-form-title">{isEditing ? "Ficha del paciente" : "Crear paciente"}</h2>
           </div>
           <button type="button" className="sheet__close" onClick={closeFormModal}>
             Cerrar
           </button>
         </div>
 
-        <form className="sheet-form" onSubmit={handleSubmit}>
-          <p className="sheet-copy">
-            {isEditing
-              ? "Ajusta los datos del paciente y guarda los cambios en la base."
-              : "Completa los datos y el paciente quedara vinculado al profesional elegido."}
-          </p>
-
-          <div className="sheet-form__grid">
-            <label className="field field--stacked">
-              <span>Nombre</span>
-              <input
-                required
-                value={form.name}
-                onChange={(event) => updateField("name", event.target.value)}
-                placeholder="Lucia Fernandez"
-              />
-            </label>
-
-            <label className="field field--stacked">
-              <span>Edad</span>
-              <input
-                required
-                type="number"
-                min="1"
-                max="120"
-                value={form.age}
-                onChange={(event) => updateField("age", event.target.value)}
-                placeholder="34"
-              />
-            </label>
-
-            <label className="field field--stacked">
-              <span>Obra social <small>(opcional)</small></span>
-              <input
-                value={form.insurance}
-                onChange={(event) => updateField("insurance", event.target.value)}
-                placeholder="OSDE 210"
-              />
-            </label>
-
-            <label className="field field--stacked">
-              <span>Plan <small>(opcional)</small></span>
-              <input
-                value={form.plan}
-                onChange={(event) => updateField("plan", event.target.value)}
-                placeholder="Plan A, Plan B, OSDE 2100"
-              />
-            </label>
-
-            <label className="field field--stacked">
-              <span>Doctor</span>
-              <select
-                required
-                value={form.doctorId}
-                onChange={(event) => updateField("doctorId", event.target.value)}
-              >
-                {doctors.length === 0 ? <option value="">Sin doctores cargados</option> : null}
-                {doctors.map((doctorOption) => (
-                  <option key={doctorOption.id} value={doctorOption.id}>
-                    {doctorOption.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field field--stacked">
-              <span>Telefono</span>
-              <input
-                required
-                value={form.phone}
-                onChange={(event) => updateField("phone", event.target.value)}
-                placeholder="+54 11 5555 1320"
-              />
-            </label>
-
-            <label className="field field--stacked">
-              <span>Ultima visita <small>(opcional)</small></span>
-              <input
-                type="date"
-                value={form.lastVisit}
-                onChange={(event) => updateField("lastVisit", event.target.value)}
-              />
-            </label>
-
-            <label className="field field--stacked">
-              <span>Proximo turno <small>(opcional)</small></span>
-              <input
-                type="datetime-local"
-                value={normalizeDateTimeInput(form.nextAppointment)}
-                onChange={(event) => updateField("nextAppointment", event.target.value)}
-              />
-            </label>
-
-            <label className="field field--stacked">
-              <span>Estado</span>
-              <select value={form.status} onChange={(event) => updateField("status", event.target.value)}>
-                <option value="active">Activo</option>
-                <option value="follow_up">Seguimiento</option>
-                <option value="waiting_docs">Falta documentacion</option>
-                <option value="priority">Prioritario</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="sheet-callout">
-            <strong>{selectedDoctor ? selectedDoctor.name : "Sin doctor seleccionado"}</strong>
-            <p>
-              {selectedDoctor
-                ? `El paciente quedara asociado a ${selectedDoctor.specialty}. Plan sugerido del profesional: ${selectedDoctor.plan || "sin plan"}.`
-                : "Selecciona un doctor para completar el guardado."}
+        <div className="stack-grid patient-sheet">
+          <form className="sheet-form" onSubmit={handleSubmit}>
+            <p className="sheet-copy">
+              {isEditing
+                ? canManage
+                  ? "Revisa la ficha del paciente. Si hace falta, ajusta sus datos y guarda los cambios. Debajo ves el historial clinico."
+                  : "Ficha del paciente en modo lectura. Debajo ves el historial clinico con sus notas y observaciones."
+                : "Completa los datos y el paciente quedara vinculado al profesional elegido."}
             </p>
-          </div>
 
-          <div className="sheet__actions">
-            <button type="button" className="secondary-button" onClick={closeFormModal}>
-              Cancelar
-            </button>
-            <button type="submit" className="primary-button" disabled={isSubmitting || !canManage}>
-              {isSubmitting ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear paciente"}
-            </button>
-          </div>
-        </form>
+            <div className="sheet-form__grid">
+              <label className="field field--stacked">
+                <span>Nombre</span>
+                <input
+                  required
+                  value={form.name}
+                  onChange={(event) => updateField("name", event.target.value)}
+                  placeholder="Lucia Fernandez"
+                  disabled={isPatientReadOnly}
+                />
+              </label>
+
+              <label className="field field--stacked">
+                <span>Edad</span>
+                <input
+                  required
+                  type="number"
+                  min="1"
+                  max="120"
+                  value={form.age}
+                  onChange={(event) => updateField("age", event.target.value)}
+                  placeholder="34"
+                  disabled={isPatientReadOnly}
+                />
+              </label>
+
+              <label className="field field--stacked">
+                <span>Obra social <small>(opcional)</small></span>
+                <input
+                  value={form.insurance}
+                  onChange={(event) => updateField("insurance", event.target.value)}
+                  placeholder="OSDE 210"
+                  disabled={isPatientReadOnly}
+                />
+              </label>
+
+              <label className="field field--stacked">
+                <span>Plan <small>(opcional)</small></span>
+                <input
+                  value={form.plan}
+                  onChange={(event) => updateField("plan", event.target.value)}
+                  placeholder="Plan A, Plan B, OSDE 2100"
+                  disabled={isPatientReadOnly}
+                />
+              </label>
+
+              <label className="field field--stacked">
+                <span>Doctor</span>
+                <select
+                  required
+                  value={form.doctorId}
+                  onChange={(event) => updateField("doctorId", event.target.value)}
+                  disabled={isPatientReadOnly}
+                >
+                  {doctors.length === 0 ? <option value="">Sin doctores cargados</option> : null}
+                  {doctors.map((doctorOption) => (
+                    <option key={doctorOption.id} value={doctorOption.id}>
+                      {doctorOption.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field field--stacked">
+                <span>Telefono</span>
+                <input
+                  required
+                  value={form.phone}
+                  onChange={(event) => updateField("phone", event.target.value)}
+                  placeholder="+54 11 5555 1320"
+                  disabled={isPatientReadOnly}
+                />
+              </label>
+
+              <label className="field field--stacked">
+                <span>Ultima visita <small>(opcional)</small></span>
+                <input
+                  type="date"
+                  value={form.lastVisit}
+                  onChange={(event) => updateField("lastVisit", event.target.value)}
+                  disabled={isPatientReadOnly}
+                />
+              </label>
+
+              <label className="field field--stacked">
+                <span>Estado</span>
+                <select
+                  value={form.status}
+                  onChange={(event) => updateField("status", event.target.value)}
+                  disabled={isPatientReadOnly}
+                >
+                  <option value="active">Activo</option>
+                  <option value="follow_up">Seguimiento</option>
+                  <option value="waiting_docs">Falta documentacion</option>
+                  <option value="priority">Prioritario</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="sheet-callout">
+              <strong>{selectedDoctor ? selectedDoctor.name : "Sin doctor seleccionado"}</strong>
+              <p>
+                {selectedDoctor
+                  ? "El paciente esta asociado a " + selectedDoctor.specialty + ". Plan sugerido del profesional: " + (selectedDoctor.plan || "sin plan") + "."
+                  : "Selecciona un doctor para completar el guardado."}
+              </p>
+            </div>
+
+            <div className="sheet__actions">
+              <button type="button" className="secondary-button" onClick={closeFormModal}>
+                {isPatientReadOnly ? "Cerrar" : "Cancelar"}
+              </button>
+              {!isPatientReadOnly ? (
+                <button type="submit" className="primary-button" disabled={isSubmitting || !canManage}>
+                  {isSubmitting ? "Guardando..." : isEditing ? "Guardar cambios" : "Crear paciente"}
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          {isEditing ? (
+            <section className="patient-history">
+              <div className="patient-history__header">
+                <div>
+                  <p className="sheet__eyebrow">Historial clinico</p>
+                  <h3>Visitas y notas</h3>
+                  <p className="sheet-copy">Carga cada visita con fecha y hora, motivo, nota clinica, observaciones y estudios pedidos.</p>
+                </div>
+                <div className="patient-history__header-side">
+                  <span className="content-card__meta">
+                    {historyEntries.length === 1 ? "1 entrada" : historyEntries.length + " entradas"}
+                  </span>
+                  {canManageHistory ? (
+                    <button type="button" className="secondary-button button--compact" onClick={startNewHistoryEntry}>
+                      Nueva visita
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {canManageHistory ? (
+                <form className="patient-history__composer" onSubmit={handleHistorySubmit}>
+                  <div className="patient-history__composer-head">
+                    <div>
+                      <h4>{editingHistoryId ? "Editar visita" : "Agregar visita"}</h4>
+                      <p className="sheet-copy">La carga rapida esta pensada para abrir, anotar y guardar sin salir del popup.</p>
+                    </div>
+                    <div className="patient-history__quick-actions">
+                      <button
+                        type="button"
+                        className="secondary-button button--compact"
+                        onClick={() => applyQuickHistoryTime(getRoundedDateTimeInput())}
+                      >
+                        Ahora
+                      </button>
+                      {editingHistoryId ? (
+                        <button type="button" className="secondary-button button--compact" onClick={startNewHistoryEntry}>
+                          Nueva visita
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {historyMessage ? (
+                    <div
+                      className={"inline-message " + (historyMessageType === "error" ? "inline-message--error" : "inline-message--success")}
+                    >
+                      {historyMessage}
+                    </div>
+                  ) : null}
+
+                  <div className="sheet-form__grid patient-history__form-grid">
+                    <label className="field field--stacked">
+                      <span>Fecha y hora</span>
+                      <input
+                        required
+                        type="datetime-local"
+                        step="300"
+                        value={historyForm.visitAt}
+                        onChange={(event) => updateHistoryField("visitAt", event.target.value)}
+                      />
+                    </label>
+
+                    <label className="field field--stacked">
+                      <span>Profesional <small>(opcional)</small></span>
+                      <select
+                        value={historyForm.doctorId}
+                        onChange={(event) => updateHistoryField("doctorId", event.target.value)}
+                      >
+                        <option value="">Sin profesional asignado</option>
+                        {doctors.map((doctorOption) => (
+                          <option key={doctorOption.id} value={doctorOption.id}>
+                            {doctorOption.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field field--stacked patient-history__full">
+                      <span>Motivo de consulta</span>
+                      <textarea
+                        rows={2}
+                        value={historyForm.reason}
+                        onChange={(event) => updateHistoryField("reason", event.target.value)}
+                        placeholder="Dolor cervical, control post operatorio, cefalea persistente..."
+                      />
+                    </label>
+
+                    <label className="field field--stacked patient-history__full">
+                      <span>Notas o indicaciones</span>
+                      <textarea
+                        rows={4}
+                        value={historyForm.notes}
+                        onChange={(event) => updateHistoryField("notes", event.target.value)}
+                        placeholder="Ejemplo: se indica resonancia, reposo relativo y control en 7 dias."
+                      />
+                    </label>
+
+                    <label className="field field--stacked patient-history__full">
+                      <span>Observaciones</span>
+                      <textarea
+                        rows={3}
+                        value={historyForm.observations}
+                        onChange={(event) => updateHistoryField("observations", event.target.value)}
+                        placeholder="Paciente refiere molestias al mover el cuello, sin fiebre, con antecedente de..."
+                      />
+                    </label>
+
+                    <label className="field field--stacked patient-history__full">
+                      <span>Estudios solicitados <small>(uno por linea o separados por coma)</small></span>
+                      <textarea
+                        rows={3}
+                        value={historyForm.requestedStudies}
+                        onChange={(event) => updateHistoryField("requestedStudies", event.target.value)}
+                        placeholder={"Resonancia de columna cervical\nLaboratorio completo"}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="sheet__actions patient-history__footer">
+                    <p className="sheet-copy">
+                      {editingHistoryId
+                        ? "Estas editando una visita ya cargada. Guarda o cancela para volver al modo rapido."
+                        : "Cada visita queda guardada dentro del paciente y se puede volver a editar desde la lista."}
+                    </p>
+                    <div className="patient-history__quick-actions">
+                      {editingHistoryId ? (
+                        <button type="button" className="secondary-button button--compact" onClick={startNewHistoryEntry}>
+                          Cancelar edicion
+                        </button>
+                      ) : null}
+                      <button type="submit" className="primary-button" disabled={isHistorySubmitting}>
+                        {isHistorySubmitting ? "Guardando..." : editingHistoryId ? "Guardar visita" : "Agregar visita"}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              ) : null}
+
+              {historyError ? <div className="inline-message inline-message--error">{historyError}</div> : null}
+
+              {isHistoryLoading ? (
+                <div className="empty-state empty-state--compact">
+                  <h3>Cargando historial</h3>
+                  <p>Estoy trayendo las visitas registradas para este paciente.</p>
+                </div>
+              ) : historyEntries.length === 0 ? (
+                <div className="empty-state empty-state--compact">
+                  <h3>Sin historial cargado</h3>
+                  <p>
+                    {storage?.connected
+                      ? canManageHistory
+                        ? "Todavia no hay visitas o notas registradas. Puedes cargar la primera desde este mismo popup."
+                        : "Todavia no hay visitas o notas registradas para este paciente."
+                      : "El historial persistido se habilita cuando Neon esta conectado."}
+                  </p>
+                </div>
+              ) : (
+                <div className="patient-history__list">
+                  {historyEntries.map((entry) => (
+                    <article key={entry.id} className="patient-history__entry">
+                      <div className="patient-history__entry-head">
+                        <div>
+                          <strong>{formatHistoryTimestamp(entry.visitAt || entry.visitDate) || formatShortSpanishDate(entry.visitDate)}</strong>
+                          <p>{entry.doctor || "Profesional no registrado"}</p>
+                        </div>
+                        <div className="patient-history__entry-actions">
+                          {entry.updatedAt || entry.createdAt ? (
+                            <small>
+                              {(entry.updatedAt && entry.createdAt && entry.updatedAt !== entry.createdAt ? "Editado " : "Cargado ") +
+                                formatHistoryTimestamp(entry.updatedAt || entry.createdAt)}
+                            </small>
+                          ) : null}
+                          {canManageHistory ? (
+                            <button
+                              type="button"
+                              className="secondary-button button--compact"
+                              onClick={() => startHistoryEdit(entry)}
+                            >
+                              Editar
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {entry.reason ? (
+                        <div className="patient-history__block">
+                          <span>Motivo</span>
+                          <p>{entry.reason}</p>
+                        </div>
+                      ) : null}
+
+                      {entry.notes ? (
+                        <div className="patient-history__block">
+                          <span>Notas o indicaciones</span>
+                          <p>{entry.notes}</p>
+                        </div>
+                      ) : null}
+
+                      {entry.observations ? (
+                        <div className="patient-history__block">
+                          <span>Observaciones</span>
+                          <p>{entry.observations}</p>
+                        </div>
+                      ) : null}
+
+                      {entry.requestedStudies?.length > 0 ? (
+                        <div className="patient-history__studies">
+                          <span>Estudios solicitados</span>
+                          <div className="chip-list">
+                            {entry.requestedStudies.map((study) => (
+                              <span key={entry.id + "-" + study} className="tag">
+                                {study}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
+        </div>
       </section>
     </div>
   ) : null;
+
+
 
   const deleteModal = deleteTarget ? (
     <div className="sheet-backdrop sheet-backdrop--center" onClick={() => setDeleteTarget(null)}>
@@ -630,15 +1109,14 @@ export function PatientsPage({ patients, filters, doctors, storage }) {
                     <span className={PATIENT_STATUS_COPY[patient.status]?.className || "status-chip"}>
                       {PATIENT_STATUS_COPY[patient.status]?.label || patient.status}
                     </span>
-                    <small>Proximo turno {patient.nextAppointment}</small>
+                    
                     <div className="record-row__actions">
                       <button
                         type="button"
                         className="secondary-button"
                         onClick={() => openEditModal(patient)}
-                        disabled={!canManage}
                       >
-                        Editar
+                        Ver
                       </button>
                       <button
                         type="button"

@@ -2,7 +2,7 @@
 
 // Aca renderizo la vista de profesionales y permito CRUD persistido en Neon.
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
@@ -30,6 +30,10 @@ function buildDoctorForm(doctor) {
   };
 }
 
+function getDoctorInsurances(doctor) {
+  return Array.isArray(doctor?.insurances) ? doctor.insurances.filter(Boolean) : [];
+}
+
 async function readJsonSafely(response) {
   const rawBody = await response.text();
 
@@ -48,6 +52,7 @@ async function readJsonSafely(response) {
 
 export function DoctorsPage({ doctors, storage }) {
   const router = useRouter();
+  const [search, setSearch] = useState("");
   const [form, setForm] = useState(buildInitialDoctorForm);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formMode, setFormMode] = useState("create");
@@ -57,9 +62,29 @@ export function DoctorsPage({ doctors, storage }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
+  const deferredSearch = useDeferredValue(search);
   const canManage = Boolean(storage?.writable);
   const isEditing = formMode === "edit";
   const isOverlayOpen = isFormOpen || Boolean(deleteTarget);
+  const normalizedSearch = deferredSearch.trim().toLowerCase();
+  const visibleDoctors = doctors.filter((doctor) => {
+    if (!normalizedSearch) {
+      return true;
+    }
+
+    return [
+      doctor.name,
+      doctor.specialty,
+      doctor.room,
+      doctor.shift,
+      doctor.plan,
+      doctor.notes,
+      getDoctorInsurances(doctor).join(" ")
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedSearch);
+  });
 
   useEffect(() => {
     if (!isOverlayOpen) {
@@ -414,63 +439,108 @@ export function DoctorsPage({ doctors, storage }) {
         <div className="content-card__header">
           <div>
             <h2>Datos de doctores</h2>
-            <p>Especialidad, horarios, plan, consultorio y coberturas aceptadas.</p>
+            <p>Especialidad, horarios, plan, consultorio y coberturas aceptadas. La busqueda revisa todos esos campos.</p>
           </div>
-          <span className="content-card__meta">{doctors.length} fichas</span>
+          <span className="content-card__meta">{visibleDoctors.length} visibles</span>
         </div>
 
-        <div className="doctor-grid">
-          {doctors.map((doctor) => (
-            <article key={doctor.id} className="doctor-card">
-              <div className="doctor-card__header">
-                <div>
-                  <strong>{doctor.name}</strong>
-                  <p>{doctor.specialty}</p>
-                </div>
-                <span className="tag">{doctor.room}</span>
-              </div>
+        <section className="toolbar toolbar--dense">
+          <label className="field field--search">
+            <span className="field__icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+            </span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar doctores, especialidad, plan o cobertura..."
+            />
+          </label>
+        </section>
 
-              <div className="doctor-card__meta">
-                <div className="info-line">
-                  <span>Horario</span>
-                  <strong>{doctor.shift}</strong>
-                </div>
-                <div className="info-line">
-                  <span>Plan</span>
-                  <strong>{doctor.plan || "Sin plan"}</strong>
-                </div>
-                <p className="subtle-copy">{doctor.notes}</p>
-              </div>
+        {visibleDoctors.length === 0 ? (
+          <div className="empty-state">
+            <h3>{doctors.length === 0 ? "Sin doctores" : "Sin coincidencias"}</h3>
+            <p>
+              {doctors.length === 0
+                ? "Todavia no hay doctores cargados."
+                : "No hay doctores que entren en la busqueda actual."}
+            </p>
+          </div>
+        ) : (
+          <div className="record-table">
+            <div className="record-table__head">
+              <span>Profesional</span>
+              <span>Consultorio</span>
+              <span>Horario</span>
+              <span>Plan y coberturas</span>
+              <span>Gestion</span>
+            </div>
 
-              <div className="chip-list">
-                {doctor.insurances.map((insurance) => (
-                  <span key={`${doctor.id}-${insurance}`} className="tag">
-                    {insurance}
-                  </span>
-                ))}
-              </div>
+            <div className="record-table__body">
+              {visibleDoctors.map((doctor) => {
+                const insurances = getDoctorInsurances(doctor);
 
-              <div className="doctor-card__actions">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => openEditModal(doctor)}
-                  disabled={!canManage}
-                >
-                  Editar
-                </button>
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={() => openDeleteModal(doctor)}
-                  disabled={!canManage}
-                >
-                  Eliminar
-                </button>
-              </div>
-            </article>
-          ))}
-        </div>
+                return (
+                  <article key={doctor.id} className="record-row">
+                    <div className="record-row__main">
+                      <strong>{doctor.name}</strong>
+                      <p>{doctor.specialty}</p>
+                      <small>{doctor.notes || "Sin notas operativas"}</small>
+                    </div>
+
+                    <div>
+                      <strong>{doctor.room}</strong>
+                      <small>Consultorio asignado</small>
+                    </div>
+
+                    <div>
+                      <strong>{doctor.shift}</strong>
+                      <small>Horario de atencion</small>
+                    </div>
+
+                    <div>
+                      <strong>{doctor.plan || "Sin plan"}</strong>
+                      <small>{insurances.length > 0 ? `${insurances.length} coberturas cargadas` : "Sin coberturas cargadas"}</small>
+                      {insurances.length > 0 ? (
+                        <div className="chip-list">
+                          {insurances.map((insurance) => (
+                            <span key={`${doctor.id}-${insurance}`} className="tag">
+                              {insurance}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="record-row__sync">
+                      <div className="record-row__actions">
+                        <button
+                          type="button"
+                          className="secondary-button"
+                          onClick={() => openEditModal(doctor)}
+                          disabled={!canManage}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="danger-button"
+                          onClick={() => openDeleteModal(doctor)}
+                          disabled={!canManage}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </section>
 
       {formModal && typeof document !== "undefined" ? createPortal(formModal, document.body) : null}
