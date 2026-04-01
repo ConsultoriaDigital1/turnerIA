@@ -66,14 +66,12 @@ export function LoginForm({ authConfigured, defaultEmail }) {
     <div className="login-page">
       <div className="login-card">
         <div className="login-card__brand">
-          <p className="brand-card__eyebrow">agenda medica inteligente</p>
-          <h1 className="brand-card__title">turnerIA</h1>
-          <p
-            className="brand-card__eyebrow"
-            style={{ marginTop: "0.5rem", marginBottom: "1rem", fontSize: "0.85rem", opacity: 0.7, letterSpacing: "0.02em", textTransform: "none" }}
-          >
-            by Consultoria Digital
-          </p>
+          <img
+            src="/turneria-logo.png"
+            alt="TurnerIA Agenda Medica Inteligente"
+            className="login-card__logo"
+            style={{ width: "100%", height: "auto", display: "block" }}
+          />
           <p className="subtle-copy">
             Acceso privado por JWT. El resto de la app queda bloqueado hasta iniciar sesion.
           </p>
