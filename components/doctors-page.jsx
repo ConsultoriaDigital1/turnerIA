@@ -50,6 +50,22 @@ async function readJsonSafely(response) {
   }
 }
 
+function getTodayDate() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Argentina/Buenos_Aires" }).format(new Date());
+}
+
+function getTicketStatusLabel(status) {
+  if (status === "called") return "Llamado";
+  if (status === "done") return "Atendido";
+  return "En espera";
+}
+
+function getTicketStatusClass(status) {
+  if (status === "called") return "tag--success";
+  if (status === "done") return "tag--muted";
+  return "tag--warning";
+}
+
 export function DoctorsPage({ doctors, storage }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -62,10 +78,16 @@ export function DoctorsPage({ doctors, storage }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("success");
+  const [queueDoctor, setQueueDoctor] = useState(null);
+  const [queueTickets, setQueueTickets] = useState([]);
+  const [isQueueLoading, setIsQueueLoading] = useState(false);
+  const [isCallingNext, setIsCallingNext] = useState(false);
+  const [queueMessage, setQueueMessage] = useState("");
+  const [queueMessageType, setQueueMessageType] = useState("success");
   const deferredSearch = useDeferredValue(search);
   const canManage = Boolean(storage?.writable);
   const isEditing = formMode === "edit";
-  const isOverlayOpen = isFormOpen || Boolean(deleteTarget);
+  const isOverlayOpen = isFormOpen || Boolean(deleteTarget) || Boolean(queueDoctor);
   const normalizedSearch = deferredSearch.trim().toLowerCase();
   const visibleDoctors = doctors.filter((doctor) => {
     if (!normalizedSearch) {
@@ -120,6 +142,75 @@ export function DoctorsPage({ doctors, storage }) {
     setIsFormOpen(false);
     setFormMode("create");
     setEditingDoctorId("");
+  }
+
+  async function fetchQueueTickets(doctorId) {
+    setIsQueueLoading(true);
+    setQueueMessage("");
+
+    try {
+      const date = getTodayDate();
+      const response = await fetch(`/api/tickets?doctorId=${doctorId}&date=${date}`);
+      const payload = await readJsonSafely(response);
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "No se pudo obtener la cola.");
+      }
+
+      setQueueTickets(payload.tickets || []);
+    } catch (error) {
+      setQueueMessageType("error");
+      setQueueMessage(error instanceof Error ? error.message : "No se pudo cargar la cola.");
+    } finally {
+      setIsQueueLoading(false);
+    }
+  }
+
+  function openQueuePanel(doctor) {
+    setQueueDoctor(doctor);
+    setQueueTickets([]);
+    setQueueMessage("");
+    fetchQueueTickets(doctor.id);
+  }
+
+  function closeQueuePanel() {
+    setQueueDoctor(null);
+    setQueueTickets([]);
+    setQueueMessage("");
+  }
+
+  async function handleCallNext() {
+    if (!queueDoctor || isCallingNext) {
+      return;
+    }
+
+    setIsCallingNext(true);
+    setQueueMessage("");
+
+    try {
+      const date = getTodayDate();
+      const response = await fetch("/api/tickets/next", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ doctorId: queueDoctor.id, date })
+      });
+      const payload = await readJsonSafely(response);
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "No se pudo llamar al siguiente.");
+      }
+
+      const called = payload.ticket;
+
+      setQueueMessageType("success");
+      setQueueMessage(`Turno #${called.ticketNumber} llamado: ${called.patientName}.`);
+      await fetchQueueTickets(queueDoctor.id);
+    } catch (error) {
+      setQueueMessageType("error");
+      setQueueMessage(error instanceof Error ? error.message : "No se pudo llamar al siguiente.");
+    } finally {
+      setIsCallingNext(false);
+    }
   }
 
   function openCreateModal() {
@@ -233,6 +324,110 @@ export function DoctorsPage({ doctors, storage }) {
       setIsDeleting(false);
     }
   }
+
+  const waitingCount = queueTickets.filter((t) => t.status === "waiting").length;
+
+  const queueModal = queueDoctor ? (
+    <div className="sheet-backdrop sheet-backdrop--center" onClick={closeQueuePanel}>
+      <section
+        className="sheet sheet--event"
+        aria-modal="true"
+        role="dialog"
+        aria-labelledby="queue-panel-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sheet__header">
+          <div>
+            <p className="sheet__eyebrow">Turnos del dia</p>
+            <h2 id="queue-panel-title">{queueDoctor.name}</h2>
+          </div>
+          <button type="button" className="sheet__close" onClick={closeQueuePanel}>
+            Cerrar
+          </button>
+        </div>
+
+        <div className="sheet-form">
+          <p className="sheet-copy">
+            {queueDoctor.specialty} &middot; {queueDoctor.room} &middot; {getTodayDate()}
+          </p>
+
+          {queueMessage ? (
+            <div
+              className={`inline-message ${queueMessageType === "success" ? "inline-message--success" : "inline-message--error"}`}
+            >
+              {queueMessage}
+            </div>
+          ) : null}
+
+          {isQueueLoading ? (
+            <div className="inline-message">Cargando turnos...</div>
+          ) : (
+            <>
+              <div className="queue-summary">
+                <div className="queue-summary__item">
+                  <strong>{waitingCount}</strong>
+                  <small>En espera</small>
+                </div>
+                <div className="queue-summary__item">
+                  <strong>{queueTickets.filter((t) => t.status === "called").length}</strong>
+                  <small>Llamados</small>
+                </div>
+                <div className="queue-summary__item">
+                  <strong>{queueTickets.filter((t) => t.status === "done").length}</strong>
+                  <small>Atendidos</small>
+                </div>
+              </div>
+
+              {queueTickets.length === 0 ? (
+                <div className="empty-state">
+                  <h3>Sin turnos hoy</h3>
+                  <p>No hay tickets registrados para hoy. Se crean automaticamente cuando un paciente confirma un turno.</p>
+                </div>
+              ) : (
+                <div className="ticket-list">
+                  {queueTickets.map((ticket) => (
+                    <div key={ticket.id} className="ticket-row">
+                      <div className="ticket-row__number">#{ticket.ticketNumber}</div>
+                      <div className="ticket-row__info">
+                        <strong>{ticket.patientName}</strong>
+                        {ticket.status === "called" && ticket.calledAt ? (
+                          <small>
+                            Llamado a las{" "}
+                            {new Date(ticket.calledAt).toLocaleTimeString("es-AR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              timeZone: "America/Argentina/Buenos_Aires"
+                            })}
+                          </small>
+                        ) : null}
+                      </div>
+                      <span className={`tag ${getTicketStatusClass(ticket.status)}`}>
+                        {getTicketStatusLabel(ticket.status)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="sheet__actions">
+            <button type="button" className="secondary-button" onClick={closeQueuePanel}>
+              Cerrar
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleCallNext}
+              disabled={isCallingNext || isQueueLoading || waitingCount === 0}
+            >
+              {isCallingNext ? "Llamando..." : "Llamar siguiente"}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  ) : null;
 
   const formModal = isFormOpen ? (
     <div className="sheet-backdrop sheet-backdrop--center" onClick={closeFormModal}>
@@ -520,6 +715,13 @@ export function DoctorsPage({ doctors, storage }) {
                         <button
                           type="button"
                           className="secondary-button"
+                          onClick={() => openQueuePanel(doctor)}
+                        >
+                          Turnos
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary-button"
                           onClick={() => openEditModal(doctor)}
                           disabled={!canManage}
                         >
@@ -543,6 +745,7 @@ export function DoctorsPage({ doctors, storage }) {
         )}
       </section>
 
+      {queueModal && typeof document !== "undefined" ? createPortal(queueModal, document.body) : null}
       {formModal && typeof document !== "undefined" ? createPortal(formModal, document.body) : null}
       {deleteModal && typeof document !== "undefined" ? createPortal(deleteModal, document.body) : null}
     </>
